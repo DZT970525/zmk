@@ -337,6 +337,91 @@ config ZMK_RGB_UNDERGLOW_AUTO_OFF_USB
 
 endif # ZMK_RGB_UNDERGLOW
 
+config INPUT_A320
+    bool "A320 touchpad Driver"
+    depends on I2C
+    help
+      Enable driver for A320
+
+config ZMK_A320_INPUT_HANDLER
+    bool "Enable A320 Input Handler"
+    default n
+    help
+      Enable the polling-based input driver for A320.
+
+
+config ZMK_INDICATOR_TP
+    bool "Enable HID indicators support"
+    default n
+    help
+      Enable support for HID indicators such as Caps Lock, Num Lock, Scroll Lock.
+
+
+config ZMK_KEYBOARD_SLIDEBACKLIGHT
+    bool "Enable Keyboard backlight at slide position"
+    default n
+    help
+      By default 80 brightness and will turn off when keyboard gets into idle status.
+config ZMK_KEYBOARD_BACKLIGHT_BRIGHTNESS
+    int "KEYBOARD BACKLIGHT BRIGHTNESS"
+    default 80
+    range 0 100
+
+config ZMK_KEYBOARD_MIDDLEBACKLIGHT
+    bool "Enable Keyboard backlight at slide position"
+    default n
+    help
+      By default 80 brightness and will turn off when keyboard gets into idle status.
+
+menuconfig ZMK_INDICATOR_CAPSLOCK
+    bool "LED indicator_capslock"
+
+if ZMK_INDICATOR_CAPSLOCK
+
+config ZMK_INDICATOR_CAPSLOCK_BRT
+    int "Default Brightness On Start"
+    range 1 100
+    default 20
+
+#ZMK_INDICATOR_CAPSLOCK
+endif
+
+menuconfig ZMK_INDICATOR_LED
+    bool "LED indicator"
+
+if ZMK_INDICATOR_LED
+
+config ZMK_IDICATOR_LAYER_BRT
+    int "Default Brightness On Start"
+    range 1 100
+    default 20
+
+config ZMK_IDICATOR_LAYER_CYCLE_MAXBRT
+    int "Brightness Cycle Max Brightness"
+    range 1 100
+    default 40
+
+config ZMK_IDICATOR_LAYER_CYCLE_MINBRT
+    int "Brightness Cycle Min Brightness"
+    range 1 100
+    default 40
+
+config ZMK_IDICATOR_LAYER_CYCLE_INTERVAL
+    int "Brightness Cycle Interval time in ms"
+    default 1000
+
+config ZMK_IDICATOR_BRT_STEP
+    int "Brightness Change For Single Step"
+    range 1 100
+    default 30
+
+config ZMK_IDICATOR_BLINK_INTERVAL
+    int "BLINK INTERVAL for INDICATOR LAYER 4"
+    default 300
+
+#ZMK_INDICATOR_LED
+endif
+
 menuconfig ZMK_BACKLIGHT
     bool "LED backlight"
     select LED

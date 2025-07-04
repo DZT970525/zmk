@@ -1,0 +1,5 @@
+menuconfig INPUT_A320
+    bool "A320 touchpad Driver"
+    depends on I2C
+    help
+      Enable driver for A320

@@ -178,7 +178,6 @@ static int backlight_event_listener(const zmk_event_t *eh) {
 
     return -ENOTSUP;
 }
-
 ZMK_LISTENER(backlight, backlight_event_listener);
 #endif // IS_ENABLED(CONFIG_ZMK_BACKLIGHT_AUTO_OFF_IDLE) ||
        // IS_ENABLED(CONFIG_ZMK_BACKLIGHT_AUTO_OFF_USB)
