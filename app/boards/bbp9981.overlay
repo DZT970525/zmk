@@ -1,3 +1,9 @@
+/ {
+    chosen {
+        zmk,studio-rpc-uart = &cdc_acm_uart; // ✅ 这是正确的 UART 设备引用
+    };
+};
+
 &gpio0 {
     status = "okay";
 };

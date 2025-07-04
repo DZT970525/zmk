@@ -1,5 +1,6 @@
-#include <physical_layouts.dtsi>
 #include <dt-bindings/zmk/matrix_transform.h>
+#include <physical_layouts.dtsi>
+
 
 / {
     bbp9981_layout: bbp9981_layout {
@@ -54,4 +55,20 @@
             , <&key_physical_attrs 125 100  775  500       0     0     0>
             ;
     };
+
+        chosen {
+            zmk,kscan = &kscan0;
+            zmk,physical-layouts = &bbp9981_layout;
+    };
+};
+
+
+&bbp9981_layout{
+	transform = <&default_transform>;
+	kscan = <&kscan0>;
+}; 
+
+zephyr_udc0: &usbd { 
+    compatible = "nordic,nrf-usbd"; 
+    status = "okay"; 
 };
