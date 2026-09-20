@@ -1,0 +1,8 @@
+file_format: "1"
+id: right_bbtrackball_corne
+name: right_bbtrackball_corne
+type: shield
+url:
+requires:
+features:
+  - mouse

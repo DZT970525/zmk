@@ -1,0 +1,10 @@
+# Copyright (c) 2023 ZitaoTech
+# SPDX-License-Identifier: MIT
+
+config BOARD_MACINTOSCH_DONGLE
+    bool "macintosch_dongle"
+    depends on SOC_NRF52840_QIAA
+
+config BOARD_BBKEYBOARD
+    bool "bbkeyboard"
+    depends on SOC_NRF52840_QIAA

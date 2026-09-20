@@ -1,7 +1,49 @@
 {
   "files.associations": {
     "*.overlay": "dts",
-    "*.keymap": "dts"
+    "*.keymap": "dts",
+    "hci_types.h": "c",
+    "ble_active_profile_changed.h": "c",
+    "device.h": "c",
+    "bbtrackball.h": "c",
+    "gpio.h": "c",
+    "backlight.h": "c",
+    "lpm009m360a.h": "c",
+    "indicator_tp.h": "c",
+    "stdbool.h": "c",
+    "endpoints.h": "c",
+    "hid_indicators.h": "c",
+    "a320_input_handler.h": "c",
+    "activity.h": "c",
+    "byteorder.h": "c",
+    "cstdint": "c",
+    "log.h": "c",
+    "devicetree.h": "c",
+    "init.h": "c",
+    "split_peripheral_status_changed.h": "c",
+    "hid_indicators_changed.h": "c",
+    "event_manager.h": "c",
+    "a320_0x3b.h": "c",
+    "input-event-codes.h": "c",
+    "led.h": "c",
+    "kernel.h": "c",
+    "trackpad_led.h": "c",
+    "rgb_underglow.h": "c",
+    "bbtrackball_input_handler.h": "c",
+    "layer_state_changed.h": "c",
+    "matrix_transform.h": "c",
+    "physical_layouts.h": "c",
+    "position_state_changed.h": "c",
+    "hid.h": "c",
+    "stdint.h": "c",
+    "display.h": "c",
+    "logo.h": "c",
+    "snake_image.h": "c",
+    "bas.h": "c",
+    "util.h": "c",
+    "usb_conn_state_changed.h": "c",
+    "input.h": "c",
+    "sensor.h": "c"
   },
   "python.analysis.include": ["app/scripts", "zephyr/scripts"],
   "[c]": {
@@ -18,5 +60,6 @@
   "[css][json][jsonc][html][markdown][yaml]": {
     "editor.formatOnSave": true,
     "editor.defaultFormatter": "esbenp.prettier-vscode"
-  }
+  },
+  "cmake.sourceDirectory": "/workspaces/zmk/app/module/drivers"
 }

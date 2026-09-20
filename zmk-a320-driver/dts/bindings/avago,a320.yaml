@@ -1,0 +1,12 @@
+description: A320 Trackpad controller
+
+compatible: "avago,a320"
+
+include: i2c-device.yaml
+
+properties:
+  motion-gpios:
+    type: phandle-array
+    required: false
+    description: |
+      The interrupt pin of the BB Trackpad.

@@ -7,4 +7,3 @@ config ZMK_KEYBOARD_NAME
     default "SETTINGS RESET"
 
 endif
-

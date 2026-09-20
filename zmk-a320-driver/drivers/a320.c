@@ -1,0 +1,147 @@
+/*
+ * A320 optical sensor driver (polling via motion GPIO, Zephyr input subsystem)
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#define DT_DRV_COMPAT avago_a320
+
+#include <zephyr/kernel.h>
+#include <zephyr/device.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/drivers/i2c.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/input/input.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/sys/byteorder.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+LOG_MODULE_REGISTER(a320, CONFIG_A320_LOG_LEVEL);
+
+// === 配置 Motion GPIO ===
+#define MOTION_GPIO_NODE DT_NODELABEL(gpio0)
+#define MOTION_GPIO_PIN 20
+static const struct device *motion_gpio_dev;
+
+/* ==== Touch 状态标志 ==== */
+static bool touched = false;
+
+/* =========================
+ *   Data & Config structs
+ * ========================= */
+struct a320_dev_config {
+    struct i2c_dt_spec i2c;
+    struct gpio_dt_spec motion_gpio; /* Motion pin: active-low */
+    uint16_t x_input_code;
+    uint16_t y_input_code;
+};
+
+struct a320_data {
+    const struct device *dev;
+    struct k_work_delayable poll_work;
+};
+
+#ifndef CONFIG_A320_POLL_INTERVAL_MS
+#define CONFIG_A320_POLL_INTERVAL_MS 1
+#endif
+
+static void a320_poll_work_handler(struct k_work *work);
+static int a320_read_motion(const struct device *dev, int16_t *dx, int16_t *dy);
+
+/* =========================
+ *   Work handler (polling)
+ * ========================= */
+static void a320_poll_work_handler(struct k_work *work) {
+    struct k_work_delayable *dwork = CONTAINER_OF(work, struct k_work_delayable, work);
+    struct a320_data *data = CONTAINER_OF(dwork, struct a320_data, poll_work);
+    const struct device *dev = data->dev;
+    int pin_state = gpio_pin_get(motion_gpio_dev, MOTION_GPIO_PIN);
+
+    if (pin_state == 0) {
+        int16_t dx = 0, dy = 0;
+        if (a320_read_motion(dev, &dx, &dy) == 0) {
+            if (dx || dy) {
+                LOG_DBG("Motion dx=%d dy=%d", dx, dy);
+                input_report_rel(dev, INPUT_REL_X, dx, false, K_FOREVER);
+                input_report_rel(dev, INPUT_REL_Y, dy, true, K_FOREVER);
+                touched = true;
+            }
+        } else {
+            touched = false;
+        }
+    }
+
+    k_work_reschedule(&data->poll_work, K_MSEC(CONFIG_A320_POLL_INTERVAL_MS));
+}
+
+/* =========================
+ *   I2C read sequence
+ * ========================= */
+static int a320_read_motion(const struct device *dev, int16_t *dx, int16_t *dy) {
+    const struct a320_dev_config *cfg = dev->config;
+    uint8_t buf[3] = {0};
+    uint8_t reg = 0x82;
+    int ret;
+
+    ret = i2c_write_dt(&cfg->i2c, &reg, 1);
+    if (ret < 0) {
+        LOG_ERR("i2c write 0x0A failed: %d", ret);
+        return ret;
+    }
+
+    ret = i2c_burst_read_dt(&cfg->i2c, 0x82, buf, sizeof(buf));
+    if (ret < 0) {
+        LOG_ERR("i2c burst read from 0x0A failed: %d", ret);
+        return ret;
+    }
+
+    *dx = (int8_t)buf[1];
+    *dy = -1 * (int8_t)buf[2];
+    return 0;
+}
+
+bool tp_is_touched(void) { return touched; }
+
+/* =========================
+ *   Device init
+ * ========================= */
+static int a320_init(const struct device *dev) {
+    const struct a320_dev_config *cfg = dev->config;
+    struct a320_data *data = dev->data;
+
+    LOG_INF("A320 init: %s", dev->name);
+
+    if (!device_is_ready(cfg->i2c.bus)) {
+        LOG_ERR("I2C bus not ready");
+        return -ENODEV;
+    }
+
+    motion_gpio_dev = DEVICE_DT_GET(MOTION_GPIO_NODE);
+    if (!device_is_ready(motion_gpio_dev)) {
+        LOG_ERR("Motion GPIO device not ready");
+        return -ENODEV;
+    }
+    gpio_pin_configure(motion_gpio_dev, MOTION_GPIO_PIN, GPIO_INPUT | GPIO_PULL_UP);
+
+    data->dev = dev;
+
+    k_work_init_delayable(&data->poll_work, a320_poll_work_handler);
+    k_work_schedule(&data->poll_work, K_MSEC(CONFIG_A320_POLL_INTERVAL_MS));
+
+    return 0;
+}
+
+#define A320_INIT_PRIORITY CONFIG_INPUT_A320_INIT_PRIORITY
+
+#define A320_DEFINE(inst)                                                                          \
+    static struct a320_data a320_data_##inst;                                                      \
+    static const struct a320_dev_config a320_config_##inst = {                                     \
+        .i2c = I2C_DT_SPEC_INST_GET(inst),                                                         \
+        .motion_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, motion_gpios, {0}),                          \
+        .x_input_code = DT_PROP_OR(DT_DRV_INST(inst), x_input_code, INPUT_REL_X),                  \
+        .y_input_code = DT_PROP_OR(DT_DRV_INST(inst), y_input_code, INPUT_REL_Y),                  \
+    };                                                                                             \
+    DEVICE_DT_INST_DEFINE(inst, a320_init, NULL, &a320_data_##inst, &a320_config_##inst,           \
+                          POST_KERNEL, A320_INIT_PRIORITY, NULL);
+
+DT_INST_FOREACH_STATUS_OKAY(A320_DEFINE)

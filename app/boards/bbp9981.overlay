@@ -1,3 +1,4 @@
+/*
 / {
     chosen {
         zmk,studio-rpc-uart = &cdc_acm_uart; // ✅ 这是正确的 UART 设备引用
@@ -16,13 +17,24 @@
     pinctrl-1 = <&i2c0_sleep>;
     pinctrl-names = "default", "sleep";
 
-    a320@57 {
+    trackpad:a320@57 {
         compatible = "avago,a320";
         reg = <0x57>;
         status = "okay";
     };
 };
+*/
 
+/*{
+    trackpad_input{
+        compatible = "zmk,input-listener";
+        device = <&trackpad>;
+        status = "okay";
+    };
+
+};*/
+
+/*
 &pinctrl {
     i2c0_default: i2c0_default {
         group1 {
@@ -40,3 +52,5 @@
         };
     };
 };
+
+*/

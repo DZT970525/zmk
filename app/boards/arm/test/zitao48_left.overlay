@@ -1,0 +1,43 @@
+#include "zitao48.dtsi"
+
+&spi0 {
+    status = "okay";
+    lpm_view: lcd@0 {
+        compatible = "jdi,lpm009m360a";
+        spi-max-frequency = <4000000>;
+        reg = <0>;
+        width = <144>;
+        height = <72>;
+        color_mode = [02];
+        reverse = <1>; 
+        rotation = <1>;
+    };
+};
+
+lpm_view_spi: &spi0 {
+    compatible = "nordic,nrf-spim";
+    pinctrl-0 = <&spi0_default>;
+    pinctrl-1 = <&spi0_sleep>;
+    pinctrl-names = "default", "sleep";
+    cs-gpios = <&gpio0 12 GPIO_ACTIVE_HIGH>;
+};
+
+nice_view_spi: &spi0 {
+    compatible = "nordic,nrf-spim";
+    pinctrl-0 = <&spi0_default>;
+    pinctrl-1 = <&spi0_sleep>;
+    pinctrl-names = "default", "sleep";
+    cs-gpios = <&gpio0 12 GPIO_ACTIVE_HIGH>;
+};
+
+&spi0 {
+    compatible = "nordic,nrf-spim";
+    status = "okay";
+    pinctrl-0 = <&spi0_default>;
+    pinctrl-1 = <&spi0_sleep>;
+    pinctrl-names = "default";
+    /* 其他配置，如 cs-gpios 等 */
+};
+
+
+

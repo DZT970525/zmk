@@ -1,0 +1,12 @@
+# Copyright (c) 2022 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+config SHIELD_LS_VIEW
+    def_bool $(shields_list_contains,ls_view)
+
+menuconfig LS013B7DH06
+		bool "LS013B7DH06 display driver"
+		default n
+		select SPI
+		help 
+		 Enable driver for LS013B7DH06 display

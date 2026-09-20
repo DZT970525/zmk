@@ -1,0 +1,8 @@
+file_format: "1"
+id: right_bbtrackball
+name: right_bbtrackball
+type: shield
+url: 
+requires: 
+features:
+  - mouse

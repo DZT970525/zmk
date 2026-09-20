@@ -24,27 +24,23 @@
         zmk,battery = &vbatt;
         zmk,kscan = &kscan0;
         zmk,physical-layouts = &bbp9981_layout;
-        //zmk,matrix_transform = &default_transform;
-        zmk,keyboard_slidebacklight = &keyboard_slidebacklight;
-        zmk,keyboard_middlebacklight = &keyboard_middlebacklight;
-        zmk,indicator_tp = &indicator_tp;
+        zmk,keyboard_backlight = &keyboard_backlight;
+        zmk,trackpad_led = &trackpad_led;
         zmk,backlight = &backlight;
-    };
-    keyboard_slidebacklight: pwmledth{
-        compatible = "pwm-leds";
-        pwm_led_0 {
-            pwms = <&pwm3 0 PWM_USEC(20) PWM_POLARITY_NORMAL>;
-        };
+        zmk,studio-rpc-uart = &cdc_acm_uart; // ✅ enable ZMK Studio
     };
 
-    keyboard_middlebacklight: pwmledfo{
+    keyboard_backlight: pwmledfo{
         compatible = "pwm-leds";
         pwm_led_0 {
             pwms = <&pwm2 0 PWM_USEC(20) PWM_POLARITY_NORMAL>;
         };
+        pwm_led_1 {
+            pwms = <&pwm3 0 PWM_MSEC(10) PWM_POLARITY_NORMAL>;
+        };
     };
 
-    indicator_tp: pwmledo{
+    trackpad_led: pwmledo{
         compatible = "pwm-leds";
         pwm_led_0 {
             pwms = <&pwm1 0 PWM_USEC(20) PWM_POLARITY_NORMAL>;
@@ -75,6 +71,7 @@ RC(3,0)          RC(3,2)             RC(3,4)             RC(3,6)          RC(3,8
     kscan0: kscan {
         compatible = "zmk,kscan-gpio-matrix";
         diode-direction = "col2row";
+        wakeup-source;
         row-gpios
             = <&gpio1 10 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
             , <&gpio0 6  (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
@@ -161,6 +158,41 @@ RC(3,0)          RC(3,2)             RC(3,4)             RC(3,6)          RC(3,8
     pinctrl-1 = <&pwm3_sleep>;
     pinctrl-names = "default", "sleep";
 };
+
+
+&i2c0 {
+    status = "okay";
+    compatible = "nordic,nrf-twim";
+    clock-frequency = <I2C_BITRATE_FAST>; 
+    pinctrl-0 = <&i2c0_default>;
+    pinctrl-1 = <&i2c0_sleep>;
+    pinctrl-names = "default", "sleep";
+
+    bbtrackpad:a320@57 {
+        compatible = "avago,a320";
+        reg = <0x57>;
+        status = "okay";
+    };
+};
+
+
+/ {
+    trackpad_inputs {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+    };
+    bbtrackpad_listener: bbtrackpad_listener {
+        compatible = "zmk,input-listener";
+        status = "disabled";
+        device = <&bbtrackpad>;
+    };
+};
+
+&bbtrackpad_listener {
+    status = "okay";
+};
+
 
 
 &usbd {

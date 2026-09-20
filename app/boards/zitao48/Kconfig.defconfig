@@ -1,0 +1,37 @@
+#
+# Copyright (c) 2022 Darryl deHaan
+# SPDX-License-Identifier: MIT
+#
+
+if BOARD_ZITAO48_LEFT
+
+config ZMK_KEYBOARD_NAME
+    default "zitao48"
+
+config ZMK_SPLIT_ROLE_CENTRAL
+    default y
+
+endif # BOARD_ZITAO48_LEFT
+
+
+if BOARD_ZITAO48_LEFT || BOARD_ZITAO48_RIGHT
+
+if ZMK_BACKLIGHT
+
+config PWM
+    default y
+
+config LED_PWM
+    default y
+
+endif # ZMK_BACKLIGHT
+
+config BOARD
+    default "zitao48"
+
+config ZMK_SPLIT
+    default y
+
+config BT_CTLR
+    default BT
+endif # BOARD_ZITAO48_LEFT || BOARD_ZITAO48_RIGHT

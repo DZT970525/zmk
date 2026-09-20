@@ -1,0 +1,25 @@
+if(CONFIG_BOARD_ZITAOTECH_SOFLE_Z_LEFT)
+zephyr_library()
+zephyr_library_sources(custom_driver_left/trackball_led.c)
+zephyr_library_sources(custom_driver_left/bbtrackball_input_handler.c)
+zephyr_library_sources(custom_driver_left/keyboard_backlight.c)
+# zephyr_library_sources(custom_driver_left/custom_led.c)
+zephyr_library_include_directories(${ZEPHYR_BASE}/drivers)
+zephyr_library_include_directories(../../../include)
+zephyr_library_include_directories(${CMAKE_SOURCE_DIR}/include)
+endif()
+
+
+if(CONFIG_BOARD_ZITAOTECH_SOFLE_Z_RIGHT)
+  zephyr_library()
+# Comment this line to enable trackpoint
+# zephyr_library_sources(custom_driver_right/trackpoint_0x15.c)
+# zephyr_library_sources(custom_driver_right/a320_0x3B.c)
+# zephyr_library_sources(custom_driver_right/trackpad_led.c)
+# zephyr_library_sources(custom_driver_right/custom_led.c)
+  zephyr_library_sources(custom_driver_right/keyboard_backlight.c)
+  zephyr_library_include_directories(${ZEPHYR_BASE}/drivers)
+  zephyr_library_include_directories(../../../include)
+  zephyr_library_include_directories(${CMAKE_SOURCE_DIR}/include)
+endif()
+

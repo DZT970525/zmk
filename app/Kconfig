@@ -354,7 +354,7 @@ config ZMK_INDICATOR_TP
     bool "Enable HID indicators support"
     default n
     help
-      Enable support for HID indicators such as Caps Lock, Num Lock, Scroll Lock.
+      Enable support for HID indicators such as Caps Loc  k, Num Lock, Scroll Lock.
 
 
 config ZMK_KEYBOARD_SLIDEBACKLIGHT

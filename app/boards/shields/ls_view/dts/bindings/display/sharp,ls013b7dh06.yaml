@@ -1,0 +1,30 @@
+# Copyright (c) 2023 Taisheng WANG <wstrn66@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+description: LS013B7DH06 display controller
+
+compatible: "sharp,ls013b7dh06"
+
+include: [spi-device.yaml, display-controller.yaml]
+
+properties:
+  # extcomin_gpios:
+  #   type: phandle-array
+  #   description: COM Inversion Polarity Input pin.
+  #
+  # disp_gpios:
+  #   type: phandle-array
+  #   required: false
+  #   description: Display ON/OFF Switching signal pin.
+
+  color_mode:
+    type: uint8-array
+    default: [0x02]
+
+  rotation:
+    type: int
+    default: 0
+
+  reverse:
+    type: int
+    default: 0

@@ -17,7 +17,7 @@
 #define MOTION_GPIO_PIN 2
 #define POLLING_INTERVAL_MS 10
 #define SCROLL_INTERVAL_MS 50
-#define SMOOTHING_SIZE 3
+#define SMOOTHING_SIZE 2
 
 LOG_MODULE_REGISTER(a320_input_handler, LOG_LEVEL_DBG);
 
@@ -95,7 +95,7 @@ void a320_thread_main(void *arg1, void *arg2, void *arg3) {
                 rawx = ((rawx < 127) ? rawx : rawx - 256) * 3 / 2 * tp_factor;
                 rawy = ((rawy < 127) ? rawy : rawy - 256) * 3 / 2 * tp_factor;
 
-                if (collecting && collect_count < 3) {
+                if (collecting && collect_count < 2) {
                     rawx /= 3;
                     rawy /= 3;
                 }
@@ -150,7 +150,7 @@ void a320_thread_main(void *arg1, void *arg2, void *arg3) {
             touched = false;
         }
 
-        k_sleep(K_MSEC(POLLING_INTERVAL_MS));
+        // k_sleep(K_MSEC(POLLING_INTERVAL_MS));
     }
 }
 

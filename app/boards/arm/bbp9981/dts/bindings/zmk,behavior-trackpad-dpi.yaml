@@ -1,0 +1,8 @@
+# Copyright (c) 2026 ZitaoTech
+# SPDX-License-Identifier: MIT
+
+description: Trackpad DPI adjustment behavior
+
+compatible: "zmk,behavior-trackpad-dpi"
+
+include: one_param.yaml

@@ -1,0 +1,210 @@
+/*
+*
+* Copyright (c) 2025 ZitaoTech
+* SPDX-License-Identifier: MIT
+*
+*/
+
+#include "zitao48.dtsi"
+//#include "zitao48_left-pinctrl.dtsi"
+/* {
+    glidepoint_listener: glidepoint_listener {
+        compatible = "zmk,input-listener";
+        status = "disabled";
+    };
+};*/
+
+
+/{
+    chosen {
+        zmk,studio-rpc-uart = &cdc_acm_uart; // ✅ 
+    };
+};
+
+/ {
+    chosen {
+        zmk,keyboard_middlebacklight = &keyboard_middlebacklight;
+        zmk,indicator_tp = &indicator_tp;
+        zmk,backlight = &backlight;
+    };
+    kscan0: kscan {
+        compatible = "zmk,kscan-gpio-matrix";
+        diode-direction = "col2row";
+        row-gpios
+            = <&gpio1 10 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
+            , <&gpio0 6  (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
+            , <&gpio0 7 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
+            , <&gpio1 13  (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
+            ;
+        col-gpios
+            = <&gpio1 8  GPIO_ACTIVE_HIGH>
+            , <&gpio1 2  GPIO_ACTIVE_HIGH>
+            , <&gpio1 6  GPIO_ACTIVE_HIGH>
+            , <&gpio0 11 GPIO_ACTIVE_HIGH>
+            , <&gpio1 11 GPIO_ACTIVE_HIGH>
+            , <&gpio0 29 GPIO_ACTIVE_HIGH>
+            ;
+    };
+
+    keyboard_middlebacklight: pwmledfo{
+        compatible = "pwm-leds";
+        pwm_led_0 {
+            pwms = <&pwm2 0 PWM_USEC(20) PWM_POLARITY_NORMAL>;
+        };
+    };
+
+    indicator_tp: pwmledo{
+        compatible = "pwm-leds";
+        pwm_led_0 {
+            pwms = <&pwm1 0 PWM_USEC(20) PWM_POLARITY_NORMAL>;
+        };
+    };
+
+    backlight: pwmleds {
+        compatible = "pwm-leds";
+        pwm_led_0 {
+            pwms = <&pwm0 0 PWM_MSEC(10) PWM_POLARITY_NORMAL>;
+        };
+    };
+    
+
+    leds {
+        compatible = "gpio-leds";
+        blue_led: led_0 {
+            gpios = <&gpio0 10 GPIO_ACTIVE_HIGH>;
+        };
+    };
+        EXT_POWER {
+        compatible = "zmk,ext-power-generic";
+        control-gpios = <&gpio0 13 GPIO_ACTIVE_LOW>;
+    };
+
+    vbatt: vbatt {
+        compatible = "zmk,battery-voltage-divider";
+        io-channels = <&adc 2>;
+        output-ohms = <2000000>;
+        full-ohms = <2820000>;  // 2000000 + 820000
+    };
+};
+
+
+&adc {
+    status = "okay";
+};
+
+&gpiote {
+    status = "okay";
+};
+
+&gpio0 {
+    status = "okay";
+};
+
+&gpio1 {
+    status = "okay";
+};
+
+&pwm0 {
+    status = "okay";
+    pinctrl-0 = <&pwm0_default>;
+    pinctrl-1 = <&pwm0_sleep>;
+    pinctrl-names = "default", "sleep";
+};
+
+&pwm1 {
+    status = "okay";
+    pinctrl-0 = <&pwm1_default>;
+    pinctrl-1 = <&pwm1_sleep>;
+    pinctrl-names = "default", "sleep";
+};
+
+&pwm2 {
+    status = "okay";
+    pinctrl-0 = <&pwm2_default>;
+    pinctrl-1 = <&pwm2_sleep>;
+    pinctrl-names = "default", "sleep";
+};
+
+
+
+
+&trackpad_listener {
+    status = "okay";
+};
+
+/*
+ * Copyright (c) 2025 ZitaoTech
+ * SPDX-License-Identifier: MIT
+ */
+
+&pinctrl {
+    i2c0_default: i2c0_default {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 0, 22)>,
+                <NRF_PSEL(TWIM_SCL, 1, 00)>;
+        };
+    };
+
+    i2c0_sleep: i2c0_sleep {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 0, 22)>,
+                <NRF_PSEL(TWIM_SCL, 1, 00)>;
+            low-power-enable;
+        };
+    };
+
+
+    pwm0_default:pwm0_default{
+        group1{
+            psels = <NRF_PSEL(PWM_OUT0, 0, 15)>; // Backlight for backlight.c unreal
+        };
+    };
+
+    pwm0_sleep: pwm0_sleep {
+        group1 {
+            psels = <NRF_PSEL(PWM_OUT0, 0, 15)>;
+            bias-pull-down;
+        };
+    };
+
+    pwm1_default:pwm1_default{
+        group1{
+            psels = <NRF_PSEL(PWM_OUT0, 0, 10)>; // Backlight for Trackpad
+        };
+    };
+
+    pwm1_sleep: pwm1_sleep {
+        group1 {
+            psels = <NRF_PSEL(PWM_OUT0, 0, 10)>;
+            bias-pull-down;
+        };
+    };
+
+    pwm2_default: pwm2_default {
+        group1 {
+            psels = <NRF_PSEL(PWM_OUT0, 0, 9)>; // Backlight for Middle Layerindicator
+        };
+    };
+
+    pwm2_sleep: pwm2_sleep {
+        group1 {
+            psels = <NRF_PSEL(PWM_OUT0, 0, 8)>;
+            bias-pull-down;
+        };
+    };
+
+    spi0_default: spi0_default {
+        group1 {
+            psels = <NRF_PSEL(SPIM_MOSI, 0, 17)>,
+            <NRF_PSEL(SPIM_SCK, 0, 20)>;
+        };
+    };
+    spi0_sleep: spi0_sleep {
+        group1 {
+            psels = <NRF_PSEL(SPIM_MOSI, 0, 17)>,
+            <NRF_PSEL(SPIM_SCK, 0, 20)>;
+            low-power-enable;
+        };
+    };
+    
+};

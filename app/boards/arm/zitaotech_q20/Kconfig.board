@@ -1,0 +1,42 @@
+# Copyright (c) 2023 ZitaoTech
+# SPDX-License-Identifier: MIT
+
+config BOARD_ZITAOTECH_Q20
+    bool "ZitaoTech_q20"
+    depends on SOC_NRF52840_QIAA
+
+menu "Backlight and LED options"
+
+config TRACKPAD_LED_BRIGHTNESS
+    int "Trackpad LED brightness when CapsLock is on"
+    default 90
+    range 0 100
+    help
+      The brightness value (0-100) to set the Trackpad LED when Caps Lock is active.
+
+endmenu
+
+menu "A320 Trackpad Setting"
+
+config A320_TRACKPAD_SCROLL_INTERVAL
+    int "Trackpad scroll in miliseconds"
+    default 50
+    range 0 200
+    help
+      The bigger this value, the slower the trackpad scrolls
+
+config A320_TRACKPAD_SPEEDMULTIPLIER_VERTICAL
+    int "Trackpad speed multiplier y"
+    default 100
+    range 1 100
+    help
+      from 1 to 100
+
+config A320_TRACKPAD_SPEEDMULTIPLIER_HORIZONTAL
+    int "Trackpad speed multiplier x"
+    default 100
+    range 1 100
+    help
+      from 1 to 100
+
+endmenu
