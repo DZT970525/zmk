@@ -1,0 +1,3 @@
+name: custom-settings-split-central
+append:
+  EXTRA_CONF_FILE: custom-settings-split-central.conf

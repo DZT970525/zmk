@@ -1,0 +1,7 @@
+/* custom_settings_usb_wired_split CENTRAL half (left). See
+ * custom_settings_usb_wired_split.dtsi.
+ *
+ * The central runs Studio (over USB) + the custom-settings split RPC relay
+ * bridge (central role, enabled via build-usb-split.yaml). USB stays on (the
+ * shared dtsi keeps &usbd enabled), so no extra devicetree is needed here. */
+#include "custom_settings_usb_wired_split.dtsi"

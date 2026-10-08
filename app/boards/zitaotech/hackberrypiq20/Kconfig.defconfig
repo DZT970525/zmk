@@ -1,0 +1,49 @@
+#
+# Copyright (c) 2026 ZitaoTech
+# SPDX-License-Identifier: MIT
+#
+
+if BOARD_HACKBERRYPIQ20
+
+config ZMK_KEYBOARD_NAME
+    default "HackberryPiQ20"
+
+config RP2_FLASH_W25Q080
+    default y
+
+if ZMK_BACKLIGHT
+
+config PWM
+    default y
+
+config LED
+    default y
+
+config LED_PWM
+    default y
+
+endif # ZMK_BACKLIGHT
+
+# ---------------------------------------------------------------------------
+# ZitaoTech Studio tabs: the same feature set the Q10/Q20 boards use -
+# runtime trackpad (DPI / scroll / mouse layer) and backlight effects.
+# ---------------------------------------------------------------------------
+config ZITAOTECH_TRACKPAD_CONTROL
+    default y
+
+config ZITAOTECH_TRACKPAD_CONTROL_STUDIO_RPC
+    default y
+
+config ZMK_INPUT_PROCESSOR_TEMP_LAYER
+    default y
+
+config ZITAOTECH_TRACKPAD_MOUSE_LAYER_CONTROL
+    default y
+
+config ZITAOTECH_BACKLIGHT_CONTROL
+    default y
+
+config ZITAOTECH_BACKLIGHT_CONTROL_STUDIO_RPC
+    default y
+
+endif # BOARD_HACKBERRYPIQ20

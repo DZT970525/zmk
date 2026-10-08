@@ -1,0 +1,156 @@
+# Copyright (c) 2026 ZitaoTech
+# SPDX-License-Identifier: MIT
+
+CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC=125000000
+
+# RP2040 platform
+CONFIG_RESET=y
+CONFIG_CLOCK_CONTROL=y
+CONFIG_GPIO=y
+CONFIG_PINCTRL=y
+
+# Build Configuration
+CONFIG_USE_DT_CODE_PARTITION=y
+CONFIG_BUILD_OUTPUT_UF2=y
+
+# Flash / settings
+CONFIG_MPU_ALLOW_FLASH_WRITE=y
+CONFIG_NVS=y
+CONFIG_SETTINGS_NVS=y
+CONFIG_FLASH=y
+CONFIG_FLASH_PAGE_LAYOUT=y
+CONFIG_FLASH_MAP=y
+
+# Bootloader support (BOOTSEL / double-tap reset retained in RAM)
+CONFIG_RETAINED_MEM=y
+CONFIG_RETENTION=y
+CONFIG_RETENTION_BOOT_MODE=y
+
+# ZMK's "double tap to enter bootloader" writes BOOT_MODE_TYPE_BOOTLOADER into
+# the retained RAM byte on *every* boot and holds it for the first 500 ms, so
+# that a quick second reset lands in the ROM bootloader.  This board runs from a
+# battery and its 3.3 V rail keeps the SRAM alive through a USB unplug, so that
+# flag often survived a power cycle and the keyboard booted straight into
+# RPI-RP2 - intermittently, which matches the reported 1/2..1/3 of the time.
+# The QMK firmware this was ported from has bootmagic disabled and does not do
+# this.  &bootloader (and the BOOT button) still enter the bootloader without
+# it, so the feature is off here.
+CONFIG_ZMK_DBL_TAP_BOOTLOADER=n
+
+# Sleep setting and idle timeout for the backlight (30 s)
+CONFIG_ZMK_SLEEP=n
+CONFIG_ZMK_IDLE_TIMEOUT=30000
+
+# Keyboard backlight (GP25)
+CONFIG_ZMK_BACKLIGHT=y
+CONFIG_ZMK_BACKLIGHT_BRT_START=100
+CONFIG_ZMK_BACKLIGHT_BRT_STEP=10
+CONFIG_ZMK_BACKLIGHT_ON_START=y
+CONFIG_ZMK_BACKLIGHT_AUTO_OFF_IDLE=y
+
+# HID indicators (Caps Lock drives the trackpad LED / scroll mode)
+CONFIG_ZMK_HID_INDICATORS=y
+
+# Pointing device / A320 trackpad
+CONFIG_INPUT=y
+CONFIG_ZMK_POINTING=y
+CONFIG_I2C=y
+CONFIG_A320=y
+CONFIG_A320_TRACKPAD_SCROLL_INTERVAL=50
+# Caps Lock scroll mode ran both axes the wrong way round compared with the
+# stock QMK firmware.  These two options are direction multipliers (1 normal,
+# -1 inverted), so invert both here.  ZitaoTech Studio's per-axis "invert
+# scroll direction" switches flip on top of this and keep working.
+CONFIG_A320_SCROLL_X_DIR=-1
+CONFIG_A320_SCROLL_Y_DIR=-1
+CONFIG_A320_MOUSE_BASE_SPEED_PERCENT=150
+CONFIG_A320_MOUSE_SENS_BASE_PERCENT=40
+CONFIG_A320_MOUSE_SENS_STEP_PERCENT=1
+# Smooth (high-resolution) scrolling, switchable at runtime from Studio.
+CONFIG_ZMK_POINTING_SMOOTH_SCROLLING=y
+
+# Debouncing
+CONFIG_ZMK_KSCAN_DEBOUNCE_PRESS_MS=10
+CONFIG_ZMK_KSCAN_DEBOUNCE_RELEASE_MS=10
+
+# USB only (the RP2040 has no radio)
+CONFIG_ZMK_USB=y
+
+# Vial matrix tester: a second HID instance with 32-byte raw HID reports.
+CONFIG_HACKBERRYPIQ20_VIAL_MATRIX=y
+CONFIG_USB_HID_DEVICE_COUNT=2
+CONFIG_ENABLE_HID_INT_OUT_EP=y
+CONFIG_HID_INTERRUPT_EP_MPS=32
+CONFIG_USB_MAX_NUM_TRANSFERS=8
+CONFIG_USB_DEVICE_SN="vial:hackberrypiq20"
+
+# Milliseconds to wait after a setting change before writing it to flash
+CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE=1000
+
+# ZMK Studio
+CONFIG_ZMK_STUDIO=y
+CONFIG_ZMK_STUDIO_LOCKING=n
+CONFIG_ZMK_STUDIO_LOCK_ON_DISCONNECT=n
+
+# Runtime macro / combo (create and edit live from ZitaoTech Studio)
+CONFIG_ZMK_BEHAVIOR_LOCAL_ID_TYPE_CRC16=y
+CONFIG_ZMK_RUNTIME_MACRO=y
+CONFIG_ZMK_RUNTIME_MACRO_STUDIO_RPC=y
+CONFIG_ZMK_RUNTIME_COMBO=y
+CONFIG_ZMK_RUNTIME_COMBO_STUDIO_RPC=y
+
+# Device info (this workspace does not carry the watchdog / kscan-diagnostics
+# modules the nRF52840 Q20 build used)
+CONFIG_ZMK_DEVICE_INFO=y
+CONFIG_ZMK_DEVICE_INFO_STUDIO_RPC=y
+
+# Per-host default layer + host OS detection (USB half only)
+CONFIG_ZMK_DEFAULT_LAYER=y
+CONFIG_ZMK_DEFAULT_LAYER_MAX_INDEX=3
+CONFIG_ZMK_OS_DETECTION=y
+CONFIG_ZMK_OS_DETECTION_STUDIO_RPC=y
+CONFIG_ZMK_OS_DETECTION_USB=y
+CONFIG_ZMK_OS_DETECTION_BLE=n
+
+# ZMK core settings exposed over Studio
+CONFIG_ZMK_SETTINGS_RPC=y
+CONFIG_ZMK_SETTINGS_RPC_STUDIO=y
+
+# ZitaoTech trackpad tab (pointer speed / scroll speed / scroll direction)
+CONFIG_ZITAOTECH_TRACKPAD_CONTROL=y
+CONFIG_ZITAOTECH_TRACKPAD_CONTROL_STUDIO_RPC=y
+CONFIG_ZMK_INPUT_PROCESSOR_TEMP_LAYER=y
+CONFIG_ZITAOTECH_TRACKPAD_MOUSE_LAYER_CONTROL=y
+CONFIG_ZITAOTECH_TRACKPAD_MOUSE_LAYER_DEFAULT=y
+# The automatic mouse layer is the last keymap layer (see MOUSE_LAYER_ID in the
+# board .dts).  The module's own default is 4, but keep it explicit: with the
+# old value 3 the module looked for the mouse layer on the media layer, so
+# "leave the mouse layer when a key is pressed" never fired and the layer stayed
+# up while typing.
+CONFIG_ZITAOTECH_TRACKPAD_MOUSE_LAYER=4
+# Q20 has no shoulder keys, so the mode keys sit two positions lower than on
+# the Q10: the two left thumb keys are 35 (fast) and 36 (slow), and the
+# bottom-left key of the letter block is 25 (direction mode).
+CONFIG_ZITAOTECH_TRACKPAD_ARROW_KEY_POSITION=25
+CONFIG_ZITAOTECH_TRACKPAD_FAST_KEY_POSITION=35
+CONFIG_ZITAOTECH_TRACKPAD_SLOW_KEY_POSITION=36
+CONFIG_ZITAOTECH_TRACKPAD_TOUCH_ON_MS=800
+
+# Backlight tab: brightness / on-off plus the per-layer indicator effect.
+CONFIG_ZITAOTECH_BACKLIGHT_CONTROL=y
+CONFIG_ZITAOTECH_BACKLIGHT_CONTROL_STUDIO_RPC=y
+
+# The custom subsystem (runtime macro) RPC request payload has to fit the whole
+# macro RPC frame, so grow the RPC RX buffer along with it.
+CONFIG_ZMK_STUDIO_RPC_RX_BUF_SIZE=192
+CONFIG_ZMK_STUDIO_RPC_CUSTOM_SUBSYSTEM_REQUEST_PAYLOAD_MAX_BYTES=192
+# A full trackpad State response (29 fields) encodes to just under 100 bytes,
+# which does not fit ZMK's default 64 byte TX ring buffer.  Let the whole frame
+# land in the buffer so it can be handed to the transport in one go.
+CONFIG_ZMK_STUDIO_RPC_TX_BUF_SIZE=512
+CONFIG_ZMK_LOW_PRIORITY_THREAD_STACK_SIZE=2048
+CONFIG_ZMK_CUSTOM_SETTINGS_LARGE_VALUE_MAX_SIZE=256
+CONFIG_MAIN_STACK_SIZE=2048
+
+# Log via USB or Segger RTT
+CONFIG_ZMK_USB_LOGGING=n

@@ -1,0 +1,4 @@
+interface:
+  display_name: "ZMK Module Bootstrap"
+  short_description: "Bootstrap ZMK modules from the Studio RPC template"
+  default_prompt: "Use $zmk-module-from-template to create a new ZMK module repository from the cormoran custom Studio RPC template."

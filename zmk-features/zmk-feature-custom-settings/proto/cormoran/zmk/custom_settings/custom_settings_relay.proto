@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package cormoran.zmk.custom_settings;
+
+import "cormoran/zmk/custom_settings/custom_settings.proto";
+
+message RelaySettingRef {
+    optional string custom_subsystem_id = 1;
+    optional string key = 2;
+    // Omitted source means local side only. UINT32_MAX means all split sides.
+    optional uint32 source = 3;
+    optional uint32 array_index = 4;
+}
+
+message RelaySettingScope {
+    optional string custom_subsystem_id = 1;
+    optional string key = 2;
+    optional string key_prefix = 3;
+    // Omitted source means local side only. UINT32_MAX means all split sides.
+    optional uint32 source = 4;
+}
+
+message RelayListSettingsRequest {
+    RelaySettingScope scope = 1;
+    bool require_meta = 2;
+    bool require_default = 3;
+}
+
+message RelayWriteSettingRequest {
+    RelaySettingRef setting = 1;
+    SettingValue value = 2;
+    SettingWriteMode mode = 3;
+}
+
+message RelayPushBackArrayRequest {
+    RelaySettingRef setting = 1;
+    SettingScalarValue value = 2;
+    SettingWriteMode mode = 3;
+}
+
+message RelayPopBackArrayRequest {
+    RelaySettingRef setting = 1;
+    SettingWriteMode mode = 2;
+}
+
+message RelayScopeMutationRequest { RelaySettingScope scope = 1; }
+
+message RelayRequest {
+    oneof request_type {
+        RelayListSettingsRequest list_settings = 1;
+        RelayWriteSettingRequest write_setting = 3;
+        RelayScopeMutationRequest save_settings = 4;
+        RelayScopeMutationRequest discard_settings = 5;
+        RelayScopeMutationRequest reset_settings = 6;
+        RelayPushBackArrayRequest push_back_array = 7;
+        RelayPopBackArrayRequest pop_back_array = 8;
+    }
+}
+
+message RelayNotification {
+    optional string custom_subsystem_id = 1;
+    Notification notification = 2;
+}

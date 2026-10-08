@@ -1,0 +1,8 @@
+pressed: position 0 keycode 0x7000E
+pressed: position 1 keycode 0x7000F
+released: position 0 keycode 0x7000E
+released: position 1 keycode 0x7000F
+pressed: position 2 keycode 0x70010
+pressed: position 3 keycode 0x70011
+released: position 2 keycode 0x70010
+released: position 3 keycode 0x70011

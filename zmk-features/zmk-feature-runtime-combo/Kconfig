@@ -1,0 +1,52 @@
+config ZMK_RUNTIME_COMBO
+    bool "Enable runtime combo"
+    select SETTINGS
+    select ZMK_CUSTOM_SETTINGS
+    select ZMK_BEHAVIOR_LOCAL_IDS
+    help
+      Enable combos that can be changed at runtime through the custom Studio RPC
+      subsystem.
+
+if ZMK_RUNTIME_COMBO
+
+config ZMK_RUNTIME_COMBO_STUDIO_RPC
+    bool "Enable runtime combo custom Studio RPC"
+    depends on ZMK_STUDIO
+    select ZMK_CUSTOM_SETTINGS_STUDIO_RPC
+
+config ZMK_RUNTIME_COMBO_MAX_COMBOS
+    int "Maximum runtime combos"
+    default 8
+    range 1 63
+    help
+      Each configured slot holds a decoded copy in a RAM cache used on the
+      key-event hot path, at roughly 64 bytes per slot (e.g. ~4 KB total at
+      the maximum of 63). Budget accordingly on RAM-constrained boards.
+
+config ZMK_RUNTIME_COMBO_MAX_POSITIONS_PER_COMBO
+    int "Maximum positions per runtime combo"
+    default 16
+    range 2 16
+
+config ZMK_RUNTIME_COMBO_DEFAULT_TIMEOUT_MS
+    int "Default runtime combo timeout"
+    default 50
+    range 1 65535
+
+config ZMK_RUNTIME_COMBO_DEFAULT_REQUIRE_PRIOR_IDLE_MS
+    int "Default runtime combo require-prior-idle time"
+    default 0
+    range 0 65535
+    help
+      A combo's positions are ignored if a non-modifier key was tapped within
+      this many milliseconds before the combo's first key press. 0 disables
+      this guard.
+
+config ZMK_RUNTIME_COMBO_TEST
+    bool "Enable runtime combo self-test setup"
+
+config ZMK_RUNTIME_COMBO_TEST_DISCARD
+    bool "Exercise zmk_runtime_combo_invalidate_cache() in the self-test setup"
+    depends on ZMK_RUNTIME_COMBO_TEST
+
+endif

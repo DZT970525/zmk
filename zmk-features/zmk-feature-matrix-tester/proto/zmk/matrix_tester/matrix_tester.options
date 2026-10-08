@@ -1,0 +1,4 @@
+zmk.matrix_tester.Response.pressed max_size:32
+zmk.matrix_tester.Response.tested max_size:32
+zmk.matrix_tester.Response.encoder_ticks max_size:64
+zmk.matrix_tester.Response.encoder_tested max_size:4

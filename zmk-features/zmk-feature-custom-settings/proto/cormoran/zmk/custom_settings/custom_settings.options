@@ -1,0 +1,43 @@
+# Nanopb options for custom_settings.proto.
+
+cormoran.zmk.custom_settings.SettingScalarValue.bytes_value max_size:64
+cormoran.zmk.custom_settings.SettingScalarValue.string_value max_size:64
+
+# The top-level Setting.value bytes/string payload is encoded/decoded through
+# a callback instead of a fixed inline array, so GetSetting/ListSettings can
+# stream a value of any size (see encode_setting_scalar_value /
+# decode_setting_scalar_value in custom_settings_handler.c). Array/scalar
+# values (SettingScalarValue above, used by array elements and constraints)
+# stay inline-capped at 64 bytes.
+cormoran.zmk.custom_settings.SettingValue.bytes_value type:FT_CALLBACK
+cormoran.zmk.custom_settings.SettingValue.string_value type:FT_CALLBACK
+
+cormoran.zmk.custom_settings.SettingConstraintOptions.values max_count:8
+cormoran.zmk.custom_settings.SettingConstraintOptions.labels max_count:8
+cormoran.zmk.custom_settings.SettingConstraintOptions.labels max_size:32
+
+cormoran.zmk.custom_settings.SettingRef.key max_size:48
+cormoran.zmk.custom_settings.SettingScope.key max_size:48
+cormoran.zmk.custom_settings.SettingScope.key_prefix max_size:48
+cormoran.zmk.custom_settings.SettingMeta.constraints max_count:8
+cormoran.zmk.custom_settings.Setting.key max_size:48
+
+cormoran.zmk.custom_settings.ErrorResponse.message max_size:96
+cormoran.zmk.custom_settings.StatusResponse.message max_size:96
+
+# Chunk payload size is independent of the setting value size limit so a
+# value larger than one RPC frame can still be transferred over several
+# chunks once per-setting value capacity grows past CHUNK_MAX_SIZE.
+cormoran.zmk.custom_settings.WriteValueChunkRequest.data max_size:128
+
+# nanopb zeroes a oneof's submessage arm when the arm's tag is first seen
+# during decode ("We memset to zero so that any callbacks are set to NULL",
+# pb_decode.c) - so a SettingValue callback wired BEFORE pb_decode() into
+# Request.write_setting/.create_setting (or a Notification's setting arm) is
+# wiped before it can run, the value field is silently skipped, and
+# which_value_type stays 0. submsg_callback generates a message-level
+# cb_<oneof> hook invoked when the arm tag is known but before the arm is
+# decoded; the handler wires the inner SettingValue callback there instead
+# (see *_arm_wire_precallback in custom_settings_handler.c).
+cormoran.zmk.custom_settings.Request submsg_callback:true
+cormoran.zmk.custom_settings.Notification submsg_callback:true

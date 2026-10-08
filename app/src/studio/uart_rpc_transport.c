@@ -12,6 +12,7 @@
 
 #include <zephyr/logging/log.h>
 #include <zmk/studio/rpc.h>
+#include <zmk/screen_usb.h>
 
 LOG_MODULE_DECLARE(zmk_studio, CONFIG_ZMK_STUDIO_LOG_LEVEL);
 
@@ -65,7 +66,7 @@ static void uart_rx_main(void) {
 }
 
 K_THREAD_DEFINE(uart_transport_read_thread, CONFIG_ZMK_STUDIO_TRANSPORT_UART_RX_STACK_SIZE,
-                uart_rx_main, NULL, NULL, NULL, K_LOWEST_APPLICATION_THREAD_PRIO, 0, 0);
+                uart_rx_main, NULL, NULL, NULL, CONFIG_ZMK_STUDIO_TRANSPORT_UART_RX_PRIORITY, 0, 0);
 
 #endif
 
@@ -101,6 +102,21 @@ static void serial_cb(const struct device *dev, void *user_data) {
     }
 
     if (uart_irq_rx_ready(uart_dev)) {
+#if IS_ENABLED(CONFIG_ZITAOTECH_SCREEN_STUDIO_RPC) && IS_ENABLED(CONFIG_ZMK_DISPLAY) && IS_ENABLED(CONFIG_SHIELD_LPM_VIEW) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+        /* Consume independent image packets before the tiny Studio RX ring. */
+        uint8_t bytes[64];
+        int count;
+        bool notify=false;
+        while ((count=uart_fifo_read(uart_dev,bytes,sizeof(bytes)))>0) {
+            for (int i=0; i<count; i++) {
+                if (zitaotech_usb_image_feed(bytes[i])) continue;
+                if (ring_buf_put(zmk_rpc_get_rx_buf(),bytes+i,1)!=1)
+                    LOG_ERR("Studio USB RX overflow");
+                else notify=true;
+            }
+        }
+        if (notify) zmk_rpc_rx_notify();
+#else
         /* read until FIFO empty */
         uint32_t last_read = 0, len = 0;
         struct ring_buf *buf = zmk_rpc_get_rx_buf();
@@ -120,6 +136,7 @@ static void serial_cb(const struct device *dev, void *user_data) {
         } while (last_read && last_read == len);
 
         zmk_rpc_rx_notify();
+#endif
     }
 
     if (uart_irq_tx_ready(uart_dev)) {
@@ -136,6 +153,16 @@ static void serial_cb(const struct device *dev, void *user_data) {
             int sent = uart_fifo_fill(uart_dev, buf, claim_len);
 
             ring_buf_get_finish(tx_buf, MAX(sent, 0));
+
+            /*
+             * The transport's own TX buffer can be full (a USB IN transfer is
+             * still in flight).  Stop draining instead of spinning forever on
+             * the same bytes - the transfer completion re-arms TX and this
+             * callback runs again.
+             */
+            if (sent <= 0) {
+                break;
+            }
         }
     }
 }

@@ -77,7 +77,7 @@ static const struct gpio_dt_spec detect_gpio = GPIO_DT_SPEC_INST_GET(0, detect_g
 #else
 
 #error                                                                                             \
-    "Need to create a node with compatible of 'zmk,wired-split` with a `device` property set to an enabled UART. See http://zmk.dev/docs/development/hardware-integration/new-shield#wired-split"
+    "Need to create a node with compatible of 'zmk,wired-split` with a `device` property set to an enabled UART. See http://zmk.dev/docs/hardware-integration/new-shield#wired-split"
 
 #endif
 
@@ -87,7 +87,7 @@ K_WORK_DEFINE(publish_events, publish_events_work);
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_WIRED_UART_MODE_ASYNC)
 
-uint8_t async_rx_buf[RX_BUFFER_SIZE / 2][2];
+uint8_t async_rx_buf[2][RX_BUFFER_SIZE / 2];
 
 static struct zmk_split_wired_async_state async_state = {
     .process_tx_work = &publish_events,
@@ -118,6 +118,13 @@ static inline int can_tx(void) { return 0; }
 static void send_pending_tx_work_cb(struct k_work *work);
 
 static K_WORK_DEFINE(wired_central_tx_work, send_pending_tx_work_cb);
+
+static void read_timer_cb(struct k_timer *_timer) {
+    zmk_split_wired_poll_in(&rx_buf, uart, &publish_events, NULL);
+    // Check if we found any bytes, read some, or read all the bytes in the RX
+}
+
+static K_TIMER_DEFINE(wired_central_read_timer, read_timer_cb, NULL);
 
 #endif
 
@@ -284,13 +291,6 @@ static void serial_cb(const struct device *dev, void *user_data) {
 static void send_pending_tx_work_cb(struct k_work *work) {
     zmk_split_wired_poll_out(&tx_buf, uart);
 }
-
-static void read_timer_cb(struct k_timer *_timer) {
-    zmk_split_wired_poll_in(&rx_buf, uart, &publish_events, NULL);
-    // Check if we found any bytes, read some, or read all the bytes in the RX
-}
-
-static K_TIMER_DEFINE(wired_central_read_timer, read_timer_cb, NULL);
 
 #endif
 

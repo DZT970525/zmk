@@ -1,0 +1,21 @@
+include:
+  - artifact: runtime_combo_board_feature_disabled
+    board: xiao_ble//zmk
+    shield: tester_xiao
+
+  - artifact: runtime_combo_board_with_rpc
+    board: xiao_ble//zmk
+    shield: tester_xiao
+    cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_RUNTIME_COMBO=y -DCONFIG_ZMK_RUNTIME_COMBO_STUDIO_RPC=y
+    snippet: studio-rpc-usb-uart
+
+  - artifact: runtime_combo_board_without_rpc
+    board: xiao_ble//zmk
+    shield: tester_xiao
+    cmake-args: -DCONFIG_ZMK_RUNTIME_COMBO=y
+
+  - artifact: custom_settings_board
+    board: xiao_ble//zmk
+    shield: tester_xiao
+    cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_RUNTIME_COMBO=y -DCONFIG_ZMK_RUNTIME_COMBO_STUDIO_RPC=y -DCONFIG_ZMK_CUSTOM_SETTINGS=y -DCONFIG_ZMK_CUSTOM_SETTINGS_STUDIO_RPC=y
+    snippet: studio-rpc-usb-uart

@@ -11,6 +11,12 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include <zmk/event_manager.h>
 
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+
+ZMK_EVENT_IMPL(zmk_relay_event_received);
+
+#endif // IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+
 extern struct zmk_event_type *__event_type_start[];
 extern struct zmk_event_type *__event_type_end[];
 

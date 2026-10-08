@@ -1,0 +1,14 @@
+syntax = "proto3";
+package zmk.matrix_tester;
+// 1: snapshot/heartbeat, 2: begin, 3: clear history, 4: stop.
+message Request { uint32 command = 1; }
+message Response {
+  uint32 key_count = 1;
+  bytes pressed = 2;
+  bytes tested = 3;
+  bool active = 4;
+  uint32 revision = 5;
+  uint32 encoder_count = 6;
+  bytes encoder_ticks = 7; // two LE16 counters per encoder: CW, CCW.
+  bytes encoder_tested = 8; // one bit per direction.
+}

@@ -1,0 +1,13 @@
+/* custom_settings_usb_wired_split PERIPHERAL half (right). See
+ * custom_settings_usb_wired_split.dtsi.
+ *
+ * The peripheral only runs the custom-settings split RPC relay's peripheral
+ * role over the WIRED split link -- no local sensor. USB is disabled here (the
+ * peripheral needs no USB, and &usbd would busy-wait under Renode); everything
+ * else (uart0 console, uart1 wired split, kscan/transform/layout) comes from
+ * the shared dtsi. */
+#include "custom_settings_usb_wired_split.dtsi"
+
+&usbd {
+	status = "disabled";
+};

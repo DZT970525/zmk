@@ -1,3 +1,4 @@
+#include <zmk/screen_transfer.h>
 /*
  * Copyright (c) 2020 The ZMK Contributors
  *
@@ -51,6 +52,11 @@ struct peripheral_slot {
     struct bt_gatt_subscribe_params subscribe_params;
     struct bt_gatt_subscribe_params sensor_subscribe_params;
     struct bt_gatt_discover_params sub_discover_params;
+#if IS_ENABLED(CONFIG_ZMK_DISPLAY) && IS_ENABLED(CONFIG_SHIELD_LPM_VIEW)
+    uint16_t image_handle;
+    struct bt_gatt_exchange_params image_mtu_params;
+    struct bt_gatt_subscribe_params image_sub;
+#endif
     uint16_t run_behavior_handle;
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING)
     struct bt_gatt_subscribe_params batt_lvl_subscribe_params;
@@ -59,6 +65,15 @@ struct peripheral_slot {
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
     uint16_t update_hid_indicators;
 #endif // IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+    uint16_t relay_event_handle;
+    struct bt_gatt_subscribe_params relay_event_subscribe_params;
+    // Dedicated CCC discovery state: bt_gatt_subscribe() refuses to reuse a
+    // discover_params whose previous CCC discovery is still queued (it returns
+    // -EBUSY), and this subscription happens right after the sensor one, so it
+    // cannot share slot->sub_discover_params.
+    struct bt_gatt_discover_params relay_event_sub_discover_params;
+#endif // IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
     uint16_t selected_physical_layout_handle;
     uint8_t position_state[POSITION_STATE_DATA_LEN];
     uint8_t changed_positions[POSITION_STATE_DATA_LEN];
@@ -73,6 +88,7 @@ struct peripheral_input_slot {
     struct bt_conn *conn;
     struct bt_gatt_subscribe_params sub;
     uint8_t reg;
+    bool reg_valid;
 };
 
 #define COUNT_INPUT_SPLIT(n) +1
@@ -87,7 +103,7 @@ static bool input_slot_is_open(size_t i) {
 static bool input_slot_is_pending(size_t i) {
     return i < ARRAY_SIZE(peripheral_input_slots) && peripheral_input_slots[i].conn != NULL &&
            (!peripheral_input_slots[i].sub.value_handle ||
-            !peripheral_input_slots[i].sub.ccc_handle || !peripheral_input_slots[i].reg);
+            !peripheral_input_slots[i].sub.ccc_handle || !peripheral_input_slots[i].reg_valid);
 }
 
 static int reserve_next_open_input_slot(struct peripheral_input_slot **slot, struct bt_conn *conn) {
@@ -99,6 +115,7 @@ static int reserve_next_open_input_slot(struct peripheral_input_slot **slot, str
             peripheral_input_slots[i].sub.value_handle = 0;
             peripheral_input_slots[i].sub.ccc_handle = 0;
             peripheral_input_slots[i].reg = 0;
+            peripheral_input_slots[i].reg_valid = false;
             *slot = &peripheral_input_slots[i];
             return i;
         }
@@ -122,7 +139,7 @@ void release_peripheral_input_subs(struct bt_conn *conn) {
     for (size_t i = 0; i < ARRAY_SIZE(peripheral_input_slots); i++) {
         if (peripheral_input_slots[i].conn == conn) {
             peripheral_input_slots[i].conn = NULL;
-            // memset(&peripheral_input_slots[i], 0, sizeof(struct peripheral_input_slot));
+            zmk_input_split_peripheral_disconnected(peripheral_input_slots[i].reg);
         }
     }
 }
@@ -219,6 +236,16 @@ int release_peripheral_slot(int index) {
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
     slot->update_hid_indicators = 0;
 #endif // IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+#if IS_ENABLED(CONFIG_ZMK_DISPLAY) && IS_ENABLED(CONFIG_SHIELD_LPM_VIEW)
+    slot->image_handle = 0;
+    memset(&slot->image_sub, 0, sizeof(slot->image_sub));
+#endif
+    slot->relay_event_handle = 0;
+    memset(&slot->relay_event_subscribe_params, 0, sizeof(slot->relay_event_subscribe_params));
+    memset(&slot->relay_event_sub_discover_params, 0,
+           sizeof(slot->relay_event_sub_discover_params));
+#endif // IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
 
     return 0;
 }
@@ -261,6 +288,48 @@ static void notify_transport_status(void);
 static void notify_status_work_cb(struct k_work *_work) { notify_transport_status(); }
 
 static K_WORK_DEFINE(notify_status_work, notify_status_work_cb);
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+
+static uint8_t split_central_relay_event_notify_func(struct bt_conn *conn,
+                                                     struct bt_gatt_subscribe_params *params,
+                                                     const void *data, uint16_t length) {
+    if (!data) {
+        LOG_DBG("[RELAY EVENT UNSUBSCRIBED]");
+        params->value_handle = 0U;
+        return BT_GATT_ITER_STOP;
+    }
+
+    if (length != sizeof(struct zmk_split_relay_event_payload)) {
+        LOG_WRN("Ignoring relay event notify with incorrect data length (%d)", length);
+        return BT_GATT_ITER_CONTINUE;
+    }
+
+    struct peripheral_event_wrapper event_wrapper = {
+        .source = peripheral_slot_index_for_conn(conn),
+        .event = {.type = ZMK_SPLIT_TRANSPORT_PERIPHERAL_EVENT_TYPE_RELAY_EVENT}};
+
+    memcpy(&event_wrapper.event.data.relay_event, data,
+           sizeof(event_wrapper.event.data.relay_event));
+    // Never trust the peer's sizes; keep the event name terminated and reject
+    // payloads that would not fit the buffers we own.
+    event_wrapper.event.data.relay_event
+        .event_type[CONFIG_ZMK_SPLIT_RELAY_EVENT_TYPE_NAME_LEN] = '\0';
+    if (event_wrapper.event.data.relay_event.event_type_size >
+            CONFIG_ZMK_SPLIT_RELAY_EVENT_TYPE_NAME_LEN ||
+        event_wrapper.event.data.relay_event.event_data_size >
+            CONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN) {
+        LOG_WRN("Malformed relay event notification");
+        return BT_GATT_ITER_CONTINUE;
+    }
+
+    k_msgq_put(&peripheral_event_msgq, &event_wrapper, K_NO_WAIT);
+    k_work_submit(&peripheral_event_work);
+
+    return BT_GATT_ITER_CONTINUE;
+}
+
+#endif // IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
 
 #if ZMK_KEYMAP_HAS_SENSORS
 
@@ -535,6 +604,37 @@ static void update_peripherals_selected_physical_layout(struct k_work *_work) {
 K_WORK_DEFINE(update_peripherals_selected_layouts_work,
               update_peripherals_selected_physical_layout);
 
+#if IS_ENABLED(CONFIG_ZMK_DISPLAY) && IS_ENABLED(CONFIG_SHIELD_LPM_VIEW)
+static void image_mtu_exchanged(struct bt_conn *conn, uint8_t err, struct bt_gatt_exchange_params *params) {
+    LOG_INF("Image channel MTU %u (err %u)",bt_gatt_get_mtu(conn),err);
+}
+static uint8_t image_ack_notify(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
+                               const void *data, uint16_t len) {
+    if (!data) { params->value_handle=0; return BT_GATT_ITER_STOP; }
+    zitaotech_image_ack_receive(data,len);
+    return BT_GATT_ITER_CONTINUE;
+}
+struct image_link_op { const void *data; size_t len; int result; bool write; };
+static void image_link_conn(struct bt_conn *conn, void *user_data) {
+    struct image_link_op *op=user_data;
+    struct peripheral_slot *slot=&peripherals[0];
+    if (conn != slot->conn || !slot->image_handle || !slot->image_sub.value_handle) return;
+    /* bt_conn_foreach holds a connection reference across this callback. */
+    op->result=op->write ? bt_gatt_write_without_response(conn,slot->image_handle,
+                                                         op->data,op->len,false)
+                         : bt_gatt_get_mtu(conn);
+}
+int zitaotech_image_link_mtu(void) {
+    struct image_link_op op={.result=-ENOTCONN};
+    bt_conn_foreach(BT_CONN_TYPE_LE,image_link_conn,&op);
+    return op.result;
+}
+int zitaotech_image_link_send(const void *data, size_t len) {
+    struct image_link_op op={.data=data,.len=len,.result=-ENOTCONN,.write=true};
+    bt_conn_foreach(BT_CONN_TYPE_LE,image_link_conn,&op);
+    return op.result;
+}
+#endif
 static uint8_t split_central_chrc_discovery_func(struct bt_conn *conn,
                                                  const struct bt_gatt_attr *attr,
                                                  struct bt_gatt_discover_params *params) {
@@ -543,7 +643,15 @@ static uint8_t split_central_chrc_discovery_func(struct bt_conn *conn,
         return BT_GATT_ITER_STOP;
     }
 
-    if (!attr->user_data) {
+    /*
+     * Only characteristic declarations have to carry a value here.  Descriptor
+     * discoveries (the input-split CCC/CPF dance) can legitimately come back
+     * empty: the peripheral's CPF descriptor stores the input device's `reg` in
+     * user_data, so reg 0 is indistinguishable from "no data".  Bailing out for
+     * those used to abort the whole walk, silently leaving every later handle
+     * -- HID indicators, physical layout and the event-relay pair -- undiscovered.
+     */
+    if (!attr->user_data && params->type == BT_GATT_DISCOVER_CHARACTERISTIC) {
         LOG_ERR("Required user data not passed to discovery");
         return BT_GATT_ITER_STOP;
     }
@@ -555,6 +663,8 @@ static uint8_t split_central_chrc_discovery_func(struct bt_conn *conn,
     }
 
     LOG_DBG("[ATTRIBUTE] handle %u", attr->handle);
+    const uint8_t discovery_type = params->type;
+    const struct bt_uuid *discovery_uuid = params->uuid;
     switch (params->type) {
     case BT_GATT_DISCOVER_CHARACTERISTIC: {
         const struct bt_uuid *chrc_uuid = ((struct bt_gatt_chrc *)attr->user_data)->uuid;
@@ -620,6 +730,49 @@ static uint8_t split_central_chrc_discovery_func(struct bt_conn *conn,
             LOG_DBG("Found update HID indicators handle");
             slot->update_hid_indicators = bt_gatt_attr_value_handle(attr);
 #endif // IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
+#if IS_ENABLED(CONFIG_ZMK_DISPLAY) && IS_ENABLED(CONFIG_SHIELD_LPM_VIEW)
+        } else if (!bt_uuid_cmp(((struct bt_gatt_chrc *)attr->user_data)->uuid,
+                               BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CHAR_IMAGE_UUID))) {
+            slot->image_handle=bt_gatt_attr_value_handle(attr);
+        } else if (!bt_uuid_cmp(((struct bt_gatt_chrc *)attr->user_data)->uuid,
+                               BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CHAR_IMAGE_ACK_UUID))) {
+            slot->image_sub.value_handle=bt_gatt_attr_value_handle(attr);
+            slot->image_sub.ccc_handle=slot->image_sub.value_handle+1;
+            slot->image_sub.end_handle=slot->discover_params.end_handle;
+            slot->image_sub.notify=image_ack_notify;
+            slot->image_sub.value=BT_GATT_CCC_NOTIFY;
+            split_central_subscribe(conn,&slot->image_sub);
+            slot->image_mtu_params.func=image_mtu_exchanged;
+            bt_gatt_exchange_mtu(conn,&slot->image_mtu_params);
+#endif
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+        } else if (!bt_uuid_cmp(((struct bt_gatt_chrc *)attr->user_data)->uuid,
+                                BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CHAR_RELAY_EVENT_UUID))) {
+            LOG_DBG("Found relay event handle");
+            slot->relay_event_handle = bt_gatt_attr_value_handle(attr);
+        } else if (!bt_uuid_cmp(((struct bt_gatt_chrc *)attr->user_data)->uuid,
+                                BT_UUID_DECLARE_128(
+                                    ZMK_SPLIT_BT_CHAR_RELAY_EVENT_NOTIFY_UUID))) {
+            LOG_DBG("Found relay event notify characteristic");
+            slot->discover_params.uuid = NULL;
+            slot->discover_params.start_handle = attr->handle + 2;
+            slot->discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
+
+            slot->relay_event_subscribe_params.disc_params =
+                &slot->relay_event_sub_discover_params;
+            slot->relay_event_subscribe_params.end_handle = slot->discover_params.end_handle;
+            slot->relay_event_subscribe_params.value_handle = bt_gatt_attr_value_handle(attr);
+            // The split service declares the notify characteristic followed
+            // immediately by its CCC descriptor, so the descriptor handle is
+            // deterministic.  Writing it directly skips the asynchronous CCC
+            // discovery, which would otherwise be queued behind the sensor
+            // subscription's own discovery and rejected with -EBUSY.
+            slot->relay_event_subscribe_params.ccc_handle =
+                bt_gatt_attr_value_handle(attr) + 1;
+            slot->relay_event_subscribe_params.notify = split_central_relay_event_notify_func;
+            slot->relay_event_subscribe_params.value = BT_GATT_CCC_NOTIFY;
+            split_central_subscribe(conn, &slot->relay_event_subscribe_params);
+#endif // IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING)
         } else if (!bt_uuid_cmp(((struct bt_gatt_chrc *)attr->user_data)->uuid,
                                 BT_UUID_BAS_BATTERY_LEVEL)) {
@@ -668,7 +821,11 @@ static uint8_t split_central_chrc_discovery_func(struct bt_conn *conn,
                 LOG_DBG("No pending input slot (%d)", ret);
             } else {
                 LOG_DBG("Found pending input slot");
-                input_slot->reg = cpf->description;
+                // The peripheral hands us the input device's reg in the CPF
+                // description, and reg 0 reads back as an empty value, so treat
+                // a missing CPF payload as reg 0 instead of dereferencing NULL.
+                input_slot->reg = cpf ? cpf->description : 0;
+                input_slot->reg_valid = true;
                 input_slot->sub.notify = peripheral_input_event_notify_cb;
                 input_slot->sub.value = BT_GATT_CCC_NOTIFY;
                 int err = split_central_subscribe(conn, &input_slot->sub);
@@ -695,6 +852,12 @@ static uint8_t split_central_chrc_discovery_func(struct bt_conn *conn,
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
     subscribed = subscribed && slot->update_hid_indicators;
 #endif // IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+    // Keep walking until the event-relay pair shows up.  A peripheral without
+    // them (older firmware) just runs to the end of the service.
+    subscribed =
+        subscribed && slot->relay_event_handle && slot->relay_event_subscribe_params.value_handle;
+#endif // IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING)
     subscribed = subscribed && slot->batt_lvl_subscribe_params.value_handle;
 #endif /* IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING) */
@@ -707,6 +870,17 @@ static uint8_t split_central_chrc_discovery_func(struct bt_conn *conn,
     }
 #endif // IS_ENABLED(CONFIG_ZMK_INPUT_SPLIT)
 
+    /* A large MTU can put several attributes in one response. Stop parsing
+     * that response when switching from characteristics to descriptors (or
+     * CCC to CPF), and issue the next discovery explicitly. Otherwise the
+     * next attribute in the old response is interpreted as the new type. */
+    if (params->type != discovery_type || params->uuid != discovery_uuid) {
+        int err = bt_gatt_discover(conn, params);
+        if (err) {
+            LOG_ERR("Failed to continue split discovery (%d)", err);
+        }
+        return BT_GATT_ITER_STOP;
+    }
     return subscribed ? BT_GATT_ITER_STOP : BT_GATT_ITER_CONTINUE;
 }
 
@@ -966,10 +1140,6 @@ static void split_central_disconnected(struct bt_conn *conn, uint8_t reason) {
 
     k_msgq_put(&peripheral_event_msgq, &ev, K_NO_WAIT);
     k_work_submit(&peripheral_event_work);
-    // struct zmk_peripheral_battery_state_changed ev = {
-    //     .source = peripheral_slot_index_for_conn(conn), .state_of_charge = 0};
-    // k_msgq_put(&peripheral_batt_lvl_msgq, &ev, K_NO_WAIT);
-    // k_work_submit(&peripheral_batt_lvl_work);
 #endif // IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING)
 
 #if IS_ENABLED(CONFIG_ZMK_INPUT_SPLIT)
@@ -1097,6 +1267,28 @@ void split_central_split_run_callback(struct k_work *work) {
             }
             break;
 #endif // IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+        case ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_RELAY_EVENT: {
+            if (peripherals[payload_wrapper.source].relay_event_handle == 0) {
+                // Same caveat as the HID indicator handle above: the peripheral
+                // can be marked connected before the characteristics are
+                // discovered.
+                LOG_WRN("No relay event handle on peripheral %d", payload_wrapper.source);
+                break;
+            }
+
+            int err = bt_gatt_write_without_response(
+                peripherals[payload_wrapper.source].conn,
+                peripherals[payload_wrapper.source].relay_event_handle,
+                &payload_wrapper.cmd.data.relay_event, sizeof(payload_wrapper.cmd.data.relay_event),
+                true);
+
+            if (err) {
+                LOG_ERR("Failed to write relay event characteristic (err %d)", err);
+            }
+            break;
+        }
+#endif // IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
         default:
             LOG_WRN("Unsupported wrapped central command type %d", payload_wrapper.cmd.type);
             return;
@@ -1180,6 +1372,9 @@ static int split_central_bt_send_command(uint8_t source,
     switch (cmd.type) {
     case ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_SET_HID_INDICATORS:
     case ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_SET_PHYSICAL_LAYOUT:
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+    case ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_RELAY_EVENT:
+#endif // IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
     case ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_INVOKE_BEHAVIOR: {
         struct central_cmd_wrapper wrapper = {.source = source, .cmd = cmd};
         return split_bt_invoke_behavior_payload(wrapper);
@@ -1288,8 +1483,11 @@ static int finish_init() {
 void peripheral_event_work_callback(struct k_work *work) {
     struct peripheral_event_wrapper ev;
     while (k_msgq_get(&peripheral_event_msgq, &ev, K_NO_WAIT) == 0) {
-        LOG_DBG("Trigger key position state change for %d",
-                ev.event.data.key_position_event.position);
+        LOG_DBG("Trigger key position state change of type %d", ev.event.type);
         zmk_split_transport_central_peripheral_event_handler(&bt_central, ev.source, ev.event);
     }
 }
+
+
+
+

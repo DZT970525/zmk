@@ -1,0 +1,44 @@
+# Copyright (c) 2026 cormoran
+#
+# SPDX-License-Identifier: MIT
+
+description: |
+  Compile-time defaults for zmk-feature-runtime-combo. Each child node
+  configures one runtime combo slot; the slot behaves exactly as if the same
+  values had been written through the custom Studio RPC, but is active
+  immediately after flashing and survives a settings erase. A slot with a
+  stored runtime value (written or explicitly deleted through the RPC) always
+  overrides its default.
+
+compatible: "cormoran,runtime-combo-defaults"
+
+child-binding:
+  description: A single default runtime combo.
+
+  properties:
+    key-positions:
+      type: array
+      required: true
+      description: Key positions that make up the combo, same as zmk,combos.
+    bindings:
+      type: phandle-array
+      required: true
+      description: The single behavior binding invoked when the combo fires.
+    layers:
+      type: array
+      description: Layers the combo is active on. Omit for all layers.
+    slow-release:
+      type: boolean
+      description: Overrides the global slow-release setting to "on" for this combo.
+    timeout-ms:
+      type: int
+      description: Overrides the global combo timeout for this combo. Omit to inherit.
+    require-prior-idle-ms:
+      type: int
+      description: Overrides the global require-prior-idle setting for this combo. Omit to inherit.
+    slot:
+      type: int
+      description: Runtime combo slot index. Defaults to the node's definition order.
+    display-name:
+      type: string
+      description: Display name shown in the Web UI. Defaults to the node name.

@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package zitaotech.bootmagic;
+
+// The half a setting belongs to.  ZitaoTech Studio is connected to the central
+// (left) half, so "peripheral" values are stored on the other half instead.
+enum Half {
+  HALF_CENTRAL = 0;
+  HALF_PERIPHERAL = 1;
+}
+
+message GetStateRequest {
+}
+
+// Absolute assignment of one half's power-up key; -1 clears it.
+message SetKeyRequest {
+  Half half = 1;
+  int32 position = 2;
+}
+
+message Request {
+  oneof request_type {
+    GetStateRequest get_state = 1;
+    SetKeyRequest set_key = 2;
+  }
+}
+
+message State {
+  // Keymap position checked at power-up on the connected (central) half.
+  int32 central_key = 1;
+  // Same for the other half, as last reported by it (-1 = unassigned / unknown).
+  int32 peripheral_key = 2;
+  // Whether the other half is currently reachable (it heartbeats over the
+  // split relay). Its key cannot be edited while it is away.
+  bool peripheral_connected = 3;
+}
+
+message Ok {
+}
+
+message Error {
+  string message = 1;
+}
+
+message Response {
+  oneof response_type {
+    State state = 1;
+    Ok ok = 2;
+    Error error = 3;
+  }
+}
+
+// Pushed when either half's setting changes, so the web UI follows along.
+message Notification {
+  State state = 1;
+}

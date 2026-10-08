@@ -1,0 +1,21 @@
+# Nanopb options for device_info.proto
+# String max sizes and repeated field configuration
+
+zmk.device_info.BuildInfo.zmk_version         max_size:80
+zmk.device_info.BuildInfo.zmk_config_version  max_size:80
+zmk.device_info.BuildInfo.module_version      max_size:80
+zmk.device_info.BuildInfo.zephyr_version      max_size:20
+zmk.device_info.BuildInfo.build_timestamp     max_size:32
+zmk.device_info.BuildInfo.board               max_size:64
+# GNU build-id is SHA1 (20 bytes) => 40 hex chars; allow headroom for other id styles
+zmk.device_info.BuildInfo.build_hash          max_size:48
+
+zmk.device_info.HardwareInfo.device_id        max_size:34
+
+# repeated ZephyrDevice uses pb_callback_t (no max_count = callback encoding)
+zmk.device_info.ZephyrDevice.name             max_size:32
+
+zmk.device_info.ZmkConfig.kscan_compatible    max_size:64
+zmk.device_info.ZmkConfig.split_role          max_size:16
+
+zmk.device_info.ErrorResponse.message         max_size:64

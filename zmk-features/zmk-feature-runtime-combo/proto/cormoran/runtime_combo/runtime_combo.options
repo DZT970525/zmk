@@ -1,0 +1,9 @@
+# Nanopb options file for runtime_combo.proto
+
+cormoran.runtime_combo.Combo.name                         max_size:64
+cormoran.runtime_combo.Combo.key_positions                max_count:16
+cormoran.runtime_combo.SetComboRequest.key_positions      max_count:16
+cormoran.runtime_combo.SetComboNameRequest.name           max_size:64
+cormoran.runtime_combo.ListCombosResponse.combos          max_count:16
+cormoran.runtime_combo.ErrorResponse.message              max_size:64
+cormoran.runtime_combo.StatusResponse.message             max_size:64

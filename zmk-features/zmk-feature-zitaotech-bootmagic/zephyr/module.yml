@@ -1,0 +1,4 @@
+name: zmk-feature-zitaotech-bootmagic
+build:
+  cmake: .
+  kconfig: Kconfig

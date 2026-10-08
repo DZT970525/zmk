@@ -1,0 +1,27 @@
+include:
+  - artifact: os_detection_board_feature_disabled
+    board: xiao_ble//zmk
+    shield: tester_xiao
+
+  - artifact: os_detection_board_with_rpc
+    board: xiao_ble//zmk
+    shield: tester_xiao
+    # CONFIG_ZMK_BLE_MANAGEMENT(_STUDIO_RPC) and CONFIG_ZMK_STUDIO_LOCKING=n
+    # are here to make manual real-hardware verification easier: switch/unpair
+    # BLE profiles from the zmk-module-ble-management web UI, and skip the
+    # unlock key-combo when connecting Studio.
+    cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_OS_DETECTION=y -DCONFIG_ZMK_OS_DETECTION_STUDIO_RPC=y -DCONFIG_ZMK_OS_DETECTION_USB=y -DCONFIG_ZMK_OS_DETECTION_BLE=y -DCONFIG_ZMK_BLE_MANAGEMENT=y -DCONFIG_ZMK_BLE_MANAGEMENT_STUDIO_RPC=y -DCONFIG_ZMK_STUDIO_LOCKING=n
+    snippet: studio-rpc-usb-uart
+
+  - artifact: os_detection_board_without_rpc
+    board: xiao_ble//zmk
+    shield: tester_xiao
+    cmake-args: -DCONFIG_ZMK_OS_DETECTION=y -DCONFIG_ZMK_OS_DETECTION_USB=y -DCONFIG_ZMK_OS_DETECTION_BLE=y
+
+  - artifact: os_detection_custom_settings_board
+    board: xiao_ble//zmk
+    shield: tester_xiao
+    # See os_detection_board_with_rpc above for why BLE_MANAGEMENT and
+    # STUDIO_LOCKING=n are set here too.
+    cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_OS_DETECTION=y -DCONFIG_ZMK_OS_DETECTION_STUDIO_RPC=y -DCONFIG_ZMK_OS_DETECTION_USB=y -DCONFIG_ZMK_OS_DETECTION_BLE=y -DCONFIG_ZMK_CUSTOM_SETTINGS=y -DCONFIG_ZMK_CUSTOM_SETTINGS_STUDIO_RPC=y -DCONFIG_ZMK_BLE_MANAGEMENT=y -DCONFIG_ZMK_BLE_MANAGEMENT_STUDIO_RPC=y -DCONFIG_ZMK_STUDIO_LOCKING=n
+    snippet: studio-rpc-usb-uart

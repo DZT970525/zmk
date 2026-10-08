@@ -1,3 +1,4 @@
+#include <zmk/screen_transfer.h>
 /*
  * Copyright (c) 2020 The ZMK Contributors
  *
@@ -25,6 +26,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/split/transport/peripheral.h>
 #include <zmk/split/bluetooth/uuid.h>
 #include <zmk/split/bluetooth/service.h>
+#include <zmk/event_manager.h>
 
 #include "peripheral.h"
 
@@ -103,6 +105,64 @@ static ssize_t split_svc_update_indicators(struct bt_conn *conn, const struct bt
 
 #endif // IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
 
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+
+/*
+ * Relayed events (see zmk/event_manager.h) arrive as a single encrypted write
+ * from the central.  The payload is tiny enough to fit in one ATT write, so no
+ * fragmentation is needed.
+ */
+static struct zmk_split_relay_event_payload relay_event_payload;
+
+static void split_svc_relay_event_callback(struct k_work *work) {
+    LOG_DBG("Relayed event '%s' of %d bytes from central", relay_event_payload.event_type,
+            relay_event_payload.event_data_size);
+
+    raise_zmk_relay_event_received((struct zmk_relay_event_received){
+        // The central is always source 0.
+        .source = 0,
+        .event_name = relay_event_payload.event_type,
+        .event_data = relay_event_payload.event_data,
+        .event_data_size = relay_event_payload.event_data_size,
+    });
+}
+
+static K_WORK_DEFINE(split_svc_relay_event_work, split_svc_relay_event_callback);
+
+static ssize_t split_svc_relay_event(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                     const void *buf, uint16_t len, uint16_t offset,
+                                     uint8_t flags) {
+    if (offset != 0 || len != sizeof(relay_event_payload)) {
+        LOG_WRN("Unexpected relay event write (len %d, offset %d)", len, offset);
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+
+    memcpy(&relay_event_payload, buf, sizeof(relay_event_payload));
+
+    // Never trust the peer's sizes; keep the name terminated and reject
+    // anything that would not fit the buffers we own.
+    relay_event_payload.event_type[CONFIG_ZMK_SPLIT_RELAY_EVENT_TYPE_NAME_LEN] = '\0';
+    if (relay_event_payload.event_type_size > CONFIG_ZMK_SPLIT_RELAY_EVENT_TYPE_NAME_LEN ||
+        relay_event_payload.event_data_size > CONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN) {
+        LOG_WRN("Malformed relay event payload");
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+
+    k_work_submit(&split_svc_relay_event_work);
+
+    return len;
+}
+
+#endif // IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+
+static void split_svc_relay_event_ccc(const struct bt_gatt_attr *attr, uint16_t value) {
+    LOG_DBG("relay event ccc value %d", value);
+}
+
+#endif // IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+
 static uint8_t selected_phys_layout = 0;
 
 static void split_svc_select_phys_layout_callback(struct k_work *work) {
@@ -178,6 +238,15 @@ ssize_t bt_gatt_attr_read_input_split_cpf(struct bt_conn *conn, const struct bt_
 
 #endif
 
+#if IS_ENABLED(CONFIG_SHIELD_LPM_VIEW)
+static ssize_t image_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                           const void *buf, uint16_t len, uint16_t offset, uint8_t flags) {
+    if (offset || zitaotech_image_receive(buf,len))
+        return BT_GATT_ERR(BT_ATT_ERR_INSUFFICIENT_RESOURCES);
+    return len;
+}
+static void image_ccc(const struct bt_gatt_attr *attr, uint16_t value) {}
+#endif
 BT_GATT_SERVICE_DEFINE(
     split_svc, BT_GATT_PRIMARY_SERVICE(BT_UUID_DECLARE_128(ZMK_SPLIT_BT_SERVICE_UUID)),
     BT_GATT_CHARACTERISTIC(BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CHAR_POSITION_STATE_UUID),
@@ -195,6 +264,30 @@ BT_GATT_SERVICE_DEFINE(
                            split_svc_sensor_state, NULL, &last_sensor_event),
     BT_GATT_CCC(split_svc_sensor_state_ccc, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 #endif /* ZMK_KEYMAP_HAS_SENSORS */
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+    /*
+     * Relayed events (see zmk/event_manager.h).  Kept ahead of the input-split
+     * characteristics on purpose: the central walks the service and stops as
+     * soon as it has everything it knows about, so anything declared after the
+     * input-split block risks never being discovered.  Same placement as the
+     * known-good v0.3 firmware.
+     */
+    BT_GATT_CHARACTERISTIC(BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CHAR_RELAY_EVENT_UUID),
+                           BT_GATT_CHRC_WRITE_WITHOUT_RESP, BT_GATT_PERM_WRITE_ENCRYPT, NULL,
+                           split_svc_relay_event, NULL),
+    BT_GATT_CHARACTERISTIC(BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CHAR_RELAY_EVENT_NOTIFY_UUID),
+                           BT_GATT_CHRC_NOTIFY, BT_GATT_PERM_READ_ENCRYPT, NULL, NULL, NULL),
+    BT_GATT_CCC(split_svc_relay_event_ccc,
+                BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+#endif // IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+#if IS_ENABLED(CONFIG_SHIELD_LPM_VIEW)
+    BT_GATT_CHARACTERISTIC(BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CHAR_IMAGE_UUID),
+                           BT_GATT_CHRC_WRITE_WITHOUT_RESP, BT_GATT_PERM_WRITE_ENCRYPT,
+                           NULL, image_write, NULL),
+    BT_GATT_CHARACTERISTIC(BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CHAR_IMAGE_ACK_UUID),
+                           BT_GATT_CHRC_NOTIFY, BT_GATT_PERM_READ_ENCRYPT, NULL, NULL, NULL),
+    BT_GATT_CCC(image_ccc, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+#endif
     DT_FOREACH_STATUS_OKAY(zmk_input_split, INPUT_SPLIT_CHARS)
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
         BT_GATT_CHARACTERISTIC(BT_UUID_DECLARE_128(ZMK_SPLIT_BT_UPDATE_HID_INDICATORS_UUID),
@@ -205,11 +298,72 @@ BT_GATT_SERVICE_DEFINE(
                            BT_GATT_CHRC_WRITE | BT_GATT_CHRC_READ,
                            BT_GATT_PERM_WRITE_ENCRYPT | BT_GATT_PERM_READ_ENCRYPT,
                            split_svc_get_selected_phys_layout, split_svc_select_phys_layout,
-                           NULL), );
+                           NULL),
+    );
 
 K_THREAD_STACK_DEFINE(service_q_stack, CONFIG_ZMK_SPLIT_BLE_PERIPHERAL_STACK_SIZE);
 
 struct k_work_q service_work_q;
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+
+/*
+ * Relaying an event back to the central.  Notifications cannot be sent from
+ * the caller's context, so the payload is queued and pushed out from the
+ * peripheral's service work queue.
+ */
+K_MSGQ_DEFINE(relay_event_msgq, sizeof(struct zmk_split_relay_event_payload),
+              CONFIG_ZMK_SPLIT_BLE_PERIPHERAL_POSITION_QUEUE_SIZE, 4);
+
+static void send_relay_event_callback(struct k_work *work) {
+    struct zmk_split_relay_event_payload payload;
+
+    while (k_msgq_get(&relay_event_msgq, &payload, K_NO_WAIT) == 0) {
+        size_t attr_index = 0;
+        for (size_t i = 0; i < split_svc.attr_count; i++) {
+            if (bt_uuid_cmp(split_svc.attrs[i].uuid,
+                            BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CHAR_RELAY_EVENT_NOTIFY_UUID)) == 0) {
+                attr_index = i;
+                break;
+            }
+        }
+
+        if (attr_index == 0) {
+            LOG_WRN("No relay event notify characteristic");
+            continue;
+        }
+
+        int err = bt_gatt_notify(NULL, &split_svc.attrs[attr_index], &payload, sizeof(payload));
+        if (err) {
+            LOG_DBG("Error notifying relay event %d", err);
+        }
+    }
+}
+
+static K_WORK_DEFINE(service_relay_event_notify_work, send_relay_event_callback);
+
+static int zmk_split_bt_report_relay_event(const struct zmk_split_relay_event_payload *payload) {
+    int err = k_msgq_put(&relay_event_msgq, payload, K_MSEC(100));
+    if (err) {
+        switch (err) {
+        case -EAGAIN: {
+            LOG_WRN("Relay event queue full, popping the oldest event");
+            struct zmk_split_relay_event_payload discarded;
+            k_msgq_get(&relay_event_msgq, &discarded, K_NO_WAIT);
+            return zmk_split_bt_report_relay_event(payload);
+        }
+        default:
+            LOG_WRN("Failed to queue relay event to send (%d)", err);
+            return err;
+        }
+    }
+
+    k_work_submit_to_queue(&service_work_q, &service_relay_event_notify_work);
+
+    return 0;
+}
+
+#endif // IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
 
 K_MSGQ_DEFINE(position_state_msgq, sizeof(char[POS_STATE_LEN]),
               CONFIG_ZMK_SPLIT_BLE_PERIPHERAL_POSITION_QUEUE_SIZE, 4);
@@ -312,6 +466,27 @@ static int zmk_split_bt_sensor_triggered(uint8_t sensor_index,
 
 #if IS_ENABLED(CONFIG_ZMK_INPUT_SPLIT)
 
+struct input_event_notify_item {
+    uint16_t attr_index;
+    struct zmk_split_input_event_payload payload;
+};
+
+K_MSGQ_DEFINE(input_event_msgq, sizeof(struct input_event_notify_item),
+              CONFIG_ZMK_INPUT_SPLIT_MSG_QUEUE_SIZE, 4);
+
+static void send_input_event_callback(struct k_work *work) {
+    struct input_event_notify_item item;
+    while (k_msgq_get(&input_event_msgq, &item, K_NO_WAIT) == 0) {
+        int err = bt_gatt_notify(NULL, &split_svc.attrs[item.attr_index], &item.payload,
+                                 sizeof(item.payload));
+        if (err) {
+            LOG_ERR("Error notifying input event %d", err);
+        }
+    }
+}
+
+static K_WORK_DEFINE(service_input_notify_work, send_input_event_callback);
+
 static int zmk_split_bt_report_input(uint8_t reg, uint8_t type, uint16_t code, int32_t value,
                                      bool sync) {
 
@@ -326,7 +501,24 @@ static int zmk_split_bt_report_input(uint8_t reg, uint8_t type, uint16_t code, i
                 .sync = sync ? 1 : 0,
             };
 
-            return bt_gatt_notify(NULL, &split_svc.attrs[i], &payload, sizeof(payload));
+            struct input_event_notify_item item = {.attr_index = (uint16_t)i, .payload = payload};
+            int err = k_msgq_put(&input_event_msgq, &item, K_NO_WAIT);
+
+            if (err == 0) {
+                k_work_submit_to_queue(&service_work_q, &service_input_notify_work);
+                return 0;
+            } else {
+                LOG_WRN("Input event queue full, dropping one and retry");
+
+                struct input_event_notify_item discarded;
+                k_msgq_get(&input_event_msgq, &discarded, K_NO_WAIT);
+                err = k_msgq_put(&input_event_msgq, &item, K_NO_WAIT);
+
+                if (err != 0) {
+                    LOG_WRN("Failed to queue input event (%d)", err);
+                    return err;
+                }
+            }
         }
     }
     return -ENODEV;
@@ -375,6 +567,10 @@ int zmk_split_transport_peripheral_bt_report_event(
         // The BLE transport uses standard BAS service for propagation, so just return success here.
         return 0;
 #endif
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+    case ZMK_SPLIT_TRANSPORT_PERIPHERAL_EVENT_TYPE_RELAY_EVENT:
+        return zmk_split_bt_report_relay_event(&ev->data.relay_event);
+#endif // IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
     default:
         LOG_WRN("Unhandled event type %d", ev->type);
         return -ENOTSUP;
@@ -435,3 +631,14 @@ static ssize_t split_svc_run_behavior(struct bt_conn *conn, const struct bt_gatt
 
     return len;
 }
+
+#if IS_ENABLED(CONFIG_SHIELD_LPM_VIEW)
+int zitaotech_image_link_ack(const void *data, size_t len) {
+    for (size_t i=0; i<split_svc.attr_count; i++) {
+        if (!bt_uuid_cmp(split_svc.attrs[i].uuid,
+                         BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CHAR_IMAGE_ACK_UUID)))
+            return bt_gatt_notify(NULL,&split_svc.attrs[i],data,len);
+    }
+    return -ENOENT;
+}
+#endif

@@ -1,0 +1,7 @@
+# Nanopb options file for custom.proto
+# This defines max sizes for string fields
+
+cormoran.rsr.ErrorResponse.message   max_size:64
+cormoran.rsr.SensorInfo.name         max_size:16
+cormoran.rsr.GetAllLayerBindingsResponse.bindings max_count:16
+cormoran.rsr.GetSensorsResponse.sensors max_count:10

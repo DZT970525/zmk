@@ -20,11 +20,29 @@ properties:
   color_mode:
     type: uint8-array
     default: [0x02]
+    description: |
+      Data mode of the panel, it is placed in the data update command:
+
+      - 0x00: 3 bit data mode, every dot is transferred as red, green and
+        blue bit, so 8 colors (black, red, green, blue, cyan, magenta, yellow,
+        white) can be displayed. This mode requires the display to be driven
+        with RGB565 data (LV_COLOR_DEPTH_16).
+      - 0x02: 1 bit data mode, every dot is transferred as a single black or
+        white bit (default).
+      - 0x04: 4 bit data mode, same colors as the 3 bit data mode, but one
+        dummy bit is transferred for every dot.
 
   rotation:
     type: int
     default: 0
+    description: |
+      0 for the native panel orientation (72 x 144) or 1 for the rotated
+      orientation (144 x 72), width and height have to match.
 
   reverse:
     type: int
     default: 0
+    description: |
+      Invert the pixel polarity of the 1 bit data mode. It is not used in the
+      color modes, use CONFIG_NICE_VIEW_WIDGET_INVERTED to invert the colors
+      of the custom status screen instead.

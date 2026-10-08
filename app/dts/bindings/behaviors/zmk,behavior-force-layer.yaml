@@ -1,0 +1,3 @@
+description: Force a target layer's bindings while held, then return to layer zero.
+compatible: "zmk,behavior-force-layer"
+include: one_param.yaml

@@ -1,0 +1,69 @@
+if SHIELD_LEFT_BBTRACKPAD_SOFLE
+
+config PWM
+    default y
+
+config LED
+    default y
+
+config LED_PWM
+    default y
+
+# ---------------------------------------------------------------------------
+# ZitaoTech Studio trackpad tab, the same feature set the Q10/Q20/bbp9981
+# boards use: runtime DPI, scroll speed and direction, smooth scrolling, burst
+# mode, the swipe threshold, the four mode keys and the automatic mouse layer.
+# The module lives in-tree (zmk-features/zmk-feature-zitaotech-trackpad) and is
+# only compiled in when these are on.
+# ---------------------------------------------------------------------------
+config ZITAOTECH_TRACKPAD_CONTROL
+    default y
+
+config ZITAOTECH_TRACKPAD_CONTROL_STUDIO_RPC
+    default y
+
+# ZMK mainline has its own smooth scrolling which runs unconditionally whenever
+# this symbol is on - it never asks ZitaoTech Studio's runtime switch, so the
+# toggle in Studio had no effect and scrolling was always smoothed.  Q10/Q20
+# leave it off and use the trackpad module's own implementation instead, which
+# does honour the runtime flag; do the same here.
+config ZMK_POINTING_SMOOTH_SCROLLING
+    default n
+
+config ZMK_INPUT_PROCESSOR_TEMP_LAYER
+    default y
+
+config ZITAOTECH_TRACKPAD_MOUSE_LAYER_CONTROL
+    default y
+
+# SOFLE uses the fourth keymap layer as the automatic mouse layer.
+config ZITAOTECH_TRACKPAD_MOUSE_LAYER
+    default 3
+
+# Factory defaults that match what this shield's driver used to hard-code:
+# the arrow-mode key is the sixth thumb key, and holding the leftmost top-row
+# key (position 0) used to switch the pad into scroll mode.
+config ZITAOTECH_TRACKPAD_ARROW_KEY_POSITION
+    default 61
+
+config ZITAOTECH_TRACKPAD_SCROLL_KEY_POSITION
+    default 0
+
+config ZITAOTECH_TRACKPAD_FAST_KEY_POSITION
+    default -1
+
+config ZITAOTECH_TRACKPAD_SLOW_KEY_POSITION
+    default -1
+
+# The custom subsystem RPC (the Studio tab itself) needs a bigger frame buffer
+# and a deeper stack than the Zephyr defaults, exactly like the other boards.
+config ZMK_STUDIO_RPC_RX_BUF_SIZE
+    default 192
+
+config ZMK_LOW_PRIORITY_THREAD_STACK_SIZE
+    default 2048
+
+config MAIN_STACK_SIZE
+    default 2048
+
+endif # SHIELD_LEFT_BBTRACKPAD_SOFLE

@@ -1,0 +1,9 @@
+file_format: "1"
+id: right_trackpoint_sofle
+name: right_trackpoint_sofle
+type: shield
+url: 
+requires: 
+features:
+  - mouse
+ 

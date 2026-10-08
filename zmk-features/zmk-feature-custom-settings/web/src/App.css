@@ -1,0 +1,253 @@
+.app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.app-header {
+  margin-bottom: 1.5rem;
+}
+
+.card {
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.btn {
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  border: 1px solid #888;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.btn-primary {
+  border-color: #1f6feb;
+  background: #1f6feb;
+  color: #fff;
+}
+
+.btn-secondary {
+  border-color: #666;
+}
+
+.btn-danger {
+  border-color: #b42318;
+  color: #b42318;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, 160px) minmax(0, 1fr);
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.form-grid label,
+.form-label {
+  align-self: center;
+  font-weight: 600;
+}
+
+.form-grid input,
+.form-grid select {
+  min-width: 0;
+  padding: 0.45rem 0.5rem;
+}
+
+.form-value {
+  min-width: 0;
+  align-self: center;
+  overflow-wrap: anywhere;
+}
+
+.constraint-control {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.constraint-control input[type="range"] {
+  width: 100%;
+}
+
+.constraint-control .hint-text {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.constraint-error {
+  margin: 0;
+  color: #b42318;
+  font-size: 0.85rem;
+}
+
+.settings-panel {
+  padding: 1rem 0;
+  border-top: 1px solid #ddd;
+}
+
+.settings-panel h3 {
+  margin: 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.settings-list {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.settings-list-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.settings-list-header h3 {
+  margin: 0;
+}
+
+.settings-list-header span,
+.empty-message,
+.hint-text {
+  color: #555;
+}
+
+.settings-subsystem {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.settings-subsystem-title {
+  margin: 0.5rem 0 0;
+  font-size: 0.95rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #333;
+}
+
+.settings-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #ddd;
+}
+
+.settings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.settings-table th,
+.settings-table td {
+  padding: 0.5rem;
+  border-bottom: 1px solid #eee;
+  text-align: left;
+  vertical-align: top;
+}
+
+.settings-table th {
+  background: #f6f8fa;
+}
+
+.selected-setting-row td {
+  background: #f6f8fa;
+}
+
+.settings-editor-row td {
+  padding: 0;
+  background: #fbfbfb;
+}
+
+.settings-editor-panel {
+  padding: 1rem;
+  border-top: 0;
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #1f6feb;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.link-button:hover,
+.link-button:focus {
+  text-decoration: underline;
+}
+
+.json-panel {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.json-panel label {
+  font-weight: 600;
+}
+
+.json-panel textarea {
+  min-width: 0;
+  padding: 0.5rem;
+  resize: vertical;
+  font-family:
+    ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+
+.setting-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin: 1rem 0 0;
+}
+
+.setting-summary div {
+  border-top: 1px solid #ddd;
+  padding-top: 0.75rem;
+}
+
+.setting-summary dt {
+  color: #555;
+  font-size: 0.85rem;
+}
+
+.setting-summary dd {
+  margin: 0.25rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.response-box {
+  margin-top: 1rem;
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+}
+
+.response-box pre {
+  margin: 0;
+  overflow-x: auto;
+}
+
+@media (max-width: 640px) {
+  .app {
+    padding: 1rem;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+}

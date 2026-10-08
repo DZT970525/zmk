@@ -1,0 +1,17 @@
+config ZMK_RUNTIME_SENSOR_ROTATE
+    bool "Enable runtime sensor rotate feature"
+    # Runtime bindings are stored as behavior local IDs and resolved back to a
+    # behavior name when the encoder turns. Without these two options every
+    # stored binding resolves to nothing, so a rotation configured from Studio
+    # silently does nothing (see behavior_runtime_sensor_rotate.c).
+    select ZMK_BEHAVIOR_LOCAL_IDS
+    select ZMK_BEHAVIOR_LOCAL_IDS_IN_BINDINGS
+
+if ZMK_RUNTIME_SENSOR_ROTATE
+
+config ZMK_RUNTIME_SENSOR_ROTATE_STUDIO_RPC
+    bool "Enable runtime sensor rotate custom Studio RPC"
+    default y
+    depends on ZMK_STUDIO
+
+endif

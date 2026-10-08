@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package zitaotech.backlight;
+
+// Effect shown on the layer indicator LED while a layer is active.
+enum LayerEffect {
+  LAYER_EFFECT_BLINK = 0;         // slow blink
+  LAYER_EFFECT_BREATH = 1;        // breathing
+  LAYER_EFFECT_FAST_BLINK = 2;    // double-speed blink
+  LAYER_EFFECT_OFF = 3;           // indicator dark
+  LAYER_EFFECT_BACKLIGHT = 4;     // same brightness as the keyboard backlight
+}
+
+message GetStateRequest {
+}
+
+message SetOnRequest {
+  bool on = 1;
+}
+
+message SetBrightnessRequest {
+  // 1..100; the firmware clamps to the range it reports in State.
+  uint32 brightness = 1;
+}
+
+message SetLayerEffectRequest {
+  // 1-based layer index (layer 0 always follows the backlight).
+  uint32 layer = 1;
+  LayerEffect effect = 2;
+}
+
+message Request {
+  oneof request_type {
+    GetStateRequest get_state = 1;
+    SetOnRequest set_on = 2;
+    SetBrightnessRequest set_brightness = 3;
+    SetLayerEffectRequest set_layer_effect = 4;
+  }
+}
+
+message State {
+  bool on = 1;
+  uint32 brightness = 2;
+  uint32 brightness_min = 3;
+  uint32 brightness_max = 4;
+  // One effect per configurable layer, layer 1 first.
+  LayerEffect layer1_effect = 5;
+  LayerEffect layer2_effect = 6;
+  LayerEffect layer3_effect = 7;
+  // Layer 4 is the automatic mouse layer on ZitaoTech boards.
+  LayerEffect layer4_effect = 8;
+}
+
+message Ok {
+}
+
+message Error {
+  string message = 1;
+}
+
+message Response {
+  oneof response_type {
+    State state = 1;
+    Ok ok = 2;
+    Error error = 3;
+  }
+}
+
+// Pushed whenever something changes on the device itself (the &bl keys, or the
+// layer-2 C / N brightness keys), so the web UI follows along live.
+message Notification {
+  State state = 1;
+}

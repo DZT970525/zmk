@@ -1,0 +1,10 @@
+config ZMK_BLE_MANAGEMENT
+    bool "Enable BLE management feature"
+
+if ZMK_BLE_MANAGEMENT
+
+config ZMK_BLE_MANAGEMENT_STUDIO_RPC
+    bool "Enable BLE management custom Studio RPC"
+    depends on ZMK_STUDIO
+
+endif

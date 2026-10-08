@@ -1,0 +1,3 @@
+name: custom-settings-split-rpc-relay
+append:
+  EXTRA_CONF_FILE: custom-settings-split-rpc-relay.conf

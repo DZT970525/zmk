@@ -1,0 +1,74 @@
+name: Test ZMK Module
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**/*.md"
+      - .github/workflows/copilot-setup-steps.yml
+      - .github/workflows/devcontainer.yml
+      - .github/workflows/claude.yml
+      - .github/workflows/codex.yml
+      - .github/workflows/template-sync.yml
+      - .github/workflows/web-ui.yml
+      - .github/actions/zmk-env/**
+      - .gitignore
+      - .claude/**
+      - .codex/**
+      - "LICENSE"
+      - "web/**"
+  pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - .github/workflows/copilot-setup-steps.yml
+      - .github/workflows/devcontainer.yml
+      - .github/workflows/claude.yml
+      - .github/workflows/codex.yml
+      - .github/workflows/template-sync.yml
+      - .github/workflows/web-ui.yml
+      - .github/actions/zmk-env/**
+      - .gitignore
+      - .claude/**
+      - .codex/**
+      - "LICENSE"
+      - "web/**"
+  workflow_dispatch:
+  schedule:
+    # 20:00 JST every Friday (11:00 UTC)
+    - cron: "0 11 * * 5"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: zmkfirmware/zmk-build-arm:stable
+    name: Build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - uses: ./.github/actions/west-init
+      - name: Test
+        run: python3 -m unittest -v
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zmk-firmware
+          path: |
+            build/*/zephyr/zmk.uf2
+
+  keepalive:
+    if: github.event_name == 'schedule'
+    permissions: write-all
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Re-enable workflow to avoid deactivating scheduled runs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_REPO: ${{ github.repository }}
+        run: |
+          gh workflow enable zmk-module.yml

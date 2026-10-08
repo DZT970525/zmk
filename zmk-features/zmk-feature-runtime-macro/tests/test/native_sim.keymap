@@ -1,0 +1,35 @@
+#include <dt-bindings/zmk/keys.h>
+#include <behaviors.dtsi>
+#include <behaviors/runtime_macro.dtsi>
+#include <dt-bindings/zmk/kscan_mock.h>
+
+/*
+ * No devicetree default macro node here on purpose: DT-default seeding
+ * timing/coexistence with other created macros is covered by the dedicated
+ * tests/dt-defaults suite. `&rmacro 1` below targets a slot no test ever
+ * creates a macro in, exercising the "empty slot plays nothing" contract
+ * (see zmk_runtime_macro_play's doc comment).
+ */
+/ {
+	keymap {
+		compatible = "zmk,keymap";
+
+		default_layer {
+			bindings = <
+			&rmacro 0
+			&rmacro 1
+			&kp C
+			&kp D
+			>;
+		};
+	};
+};
+
+&kscan {
+	events = <
+	ZMK_MOCK_PRESS(0,0,10)
+	ZMK_MOCK_RELEASE(0,0,10)
+	ZMK_MOCK_PRESS(0,1,10)
+	ZMK_MOCK_RELEASE(0,1,10)
+	>;
+};

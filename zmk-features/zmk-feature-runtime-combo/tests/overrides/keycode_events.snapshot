@@ -1,0 +1,16 @@
+pressed: position 10 keycode 0x70005
+released: position 10 keycode 0x70005
+pressed: position 12 keycode 0x70007
+released: position 12 keycode 0x70007
+pressed: position 11 keycode 0x70006
+released: position 11 keycode 0x70006
+pressed: position 9 keycode 0x70017
+released: position 9 keycode 0x70017
+pressed: position 5 keycode 0x70013
+pressed: position 6 keycode 0x70014
+released: position 5 keycode 0x70013
+released: position 6 keycode 0x70014
+pressed: position 13 keycode 0x70008
+released: position 13 keycode 0x70008
+pressed: position 14 keycode 0x70009
+released: position 14 keycode 0x70009

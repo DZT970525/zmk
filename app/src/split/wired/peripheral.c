@@ -76,7 +76,7 @@ static const struct gpio_dt_spec detect_gpio = GPIO_DT_SPEC_INST_GET(0, detect_g
 #else
 
 #error                                                                                             \
-    "Need to create a node with compatible of 'zmk,wired-split` with a `device` property set to an enabled UART. See http://zmk.dev/docs/development/hardware-integration/new-shield#wired-split"
+    "Need to create a node with compatible of 'zmk,wired-split` with a `device` property set to an enabled UART. See http://zmk.dev/docs/hardware-integration/new-shield#wired-split"
 
 #endif
 
@@ -89,7 +89,7 @@ K_MSGQ_DEFINE(cmd_msg_queue, sizeof(struct zmk_split_transport_central_command),
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_WIRED_UART_MODE_ASYNC)
 
-uint8_t async_rx_buf[RX_BUFFER_SIZE / 2][2];
+uint8_t async_rx_buf[2][RX_BUFFER_SIZE / 2];
 
 static struct zmk_split_wired_async_state async_state = {
     .rx_bufs = {async_rx_buf[0], async_rx_buf[1]},
@@ -105,6 +105,16 @@ static struct zmk_split_wired_async_state async_state = {
 
 #endif
 
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_WIRED_UART_MODE_POLLING)
+
+static void wired_peripheral_read_tick_cb(struct k_timer *timer) {
+    zmk_split_wired_poll_in(&chosen_rx_buf, uart, NULL, process_tx_cb);
+}
+
+static K_TIMER_DEFINE(wired_peripheral_read_timer, wired_peripheral_read_tick_cb, NULL);
+
+#endif // IS_ENABLED(CONFIG_ZMK_SPLIT_WIRED_UART_MODE_POLLING)
+
 static void begin_rx(void) {
 #if IS_ENABLED(CONFIG_PM_DEVICE_RUNTIME)
     pm_device_runtime_get(uart);
@@ -117,7 +127,7 @@ static void begin_rx(void) {
 #elif IS_ENABLED(CONFIG_ZMK_SPLIT_WIRED_UART_MODE_ASYNC)
     zmk_split_wired_async_rx(&async_state);
 #else
-    k_timer_start(&wired_central_read_timer, K_TICKS(CONFIG_ZMK_SPLIT_WIRED_POLLING_RX_PERIOD),
+    k_timer_start(&wired_peripheral_read_timer, K_TICKS(CONFIG_ZMK_SPLIT_WIRED_POLLING_RX_PERIOD),
                   K_TICKS(CONFIG_ZMK_SPLIT_WIRED_POLLING_RX_PERIOD));
 #endif
 }
@@ -130,7 +140,7 @@ static void stop_rx(void) {
 #elif IS_ENABLED(CONFIG_ZMK_SPLIT_WIRED_UART_MODE_ASYNC)
     zmk_split_wired_async_rx_cancel(&async_state);
 #else
-    k_timer_stop(&wired_central_read_timer);
+    k_timer_stop(&wired_peripheral_read_timer);
 #endif
 
 #if IS_ENABLED(CONFIG_PM_DEVICE_RUNTIME)
@@ -176,12 +186,6 @@ static void send_pending_tx_work_cb(struct k_work *work) {
 }
 
 static K_WORK_DEFINE(send_pending_tx, send_pending_tx_work_cb);
-
-static void wired_peripheral_read_tick_cb(struct k_timer *timer) {
-    zmk_split_wired_poll_in(&chosen_rx_buf, uart, NULL, process_tx_cb);
-}
-
-static K_TIMER_DEFINE(wired_peripheral_read_timer, wired_peripheral_read_tick_cb, NULL);
 
 #endif
 

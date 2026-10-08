@@ -1,0 +1,4 @@
+name: zmk-feature-zitaotech-backlight
+build:
+  cmake: .
+  kconfig: Kconfig

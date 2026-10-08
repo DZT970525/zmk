@@ -1,0 +1,2 @@
+s/.*PASS: custom_settings_/PASS: custom_settings_/p
+s/.*PASS: split_peripheral_relay/PASS: split_peripheral_relay/p

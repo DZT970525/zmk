@@ -1,0 +1,32 @@
+/*
+ * Diagnostic overlay only (never part of the shipped firmware).
+ *
+ * Drives the keyboard backlight pin as a plain GPIO instead of PWM, so that
+ * "LED stays dark" can be told apart from "the PWM channel/slice is wrong":
+ *
+ *   LED lights up  -> the GPIO/LED circuit is fine, the PWM path is at fault
+ *   still dark     -> GP25 is not the keyboard backlight on this board, or the
+ *                     LED circuit itself needs something else
+ *
+ * Build:
+ *   west build -p always -b hackberrypiq20/rp2040/zmk -s app -d build-hbq20-gpiotest \
+ *       -- -DEXTRA_DTC_OVERLAY_FILE=boards/zitaotech/hackberrypiq20/debug-gpio-backlight.overlay
+ */
+
+&backlight {
+    status = "disabled";
+};
+
+/ {
+    chosen {
+        zmk,backlight = &gpio_backlight;
+    };
+
+    gpio_backlight: gpio_backlight {
+        compatible = "gpio-leds";
+
+        led_0 {
+            gpios = <&gpio0 25 GPIO_ACTIVE_HIGH>;
+        };
+    };
+};

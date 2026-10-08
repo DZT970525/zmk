@@ -1,0 +1,32 @@
+config ZMK_DEVICE_INFO
+    bool "Enable ZMK device info reporting"
+
+if ZMK_DEVICE_INFO
+
+config ZMK_DEVICE_INFO_STUDIO_RPC
+    bool "Enable ZMK device info custom Studio RPC"
+    depends on ZMK_STUDIO
+
+config ZMK_DEVICE_INFO_VERSION
+    string "Firmware version string reported by Studio"
+    depends on ZMK_DEVICE_INFO_STUDIO_RPC
+    default ""
+    help
+      Overrides the version the module reports as build.zmk_version. Leave it
+      empty to report the ZMK git describe output; set it (for example
+      "BetaV0.0") to stamp an explicit release name into the firmware. Change
+      this one value for every build whose version you want to name yourself.
+
+config ZMK_DEVICE_INFO_STUDIO_RPC_REQUIRE_UNLOCK
+    bool "Require a Studio unlock to read device info"
+    depends on ZMK_DEVICE_INFO_STUDIO_RPC
+    default y
+    help
+      When enabled (the default), the device info RPC subsystem is marked
+      "secured": a connected Studio client must unlock the keyboard before it
+      can read any device info (build/hardware/config/runtime). When disabled,
+      the subsystem is "unsecured" and device info can be read without an
+      unlock -- handy for headless diagnostics, but it exposes build and
+      hardware details to any Studio-capable host that can reach the keyboard.
+
+endif

@@ -1,0 +1,16 @@
+if(CONFIG_ZMK_MATRIX_TESTER)
+  # Observe original events before combo/hold-tap capture, without a ZMK fork.
+  zephyr_link_libraries(-Wl,--wrap=zmk_event_manager_raise)
+  target_sources(app PRIVATE src/matrix_tester.c)
+  list(APPEND CMAKE_MODULE_PATH ${ZEPHYR_BASE}/modules/nanopb)
+  include(nanopb)
+  set(NANOPB_GENERATE_CPP_APPEND_PATH TRUE)
+  set(NANOPB_GENERATE_CPP_STANDALONE OFF)
+  zephyr_library()
+  nanopb_generate_cpp(proto_srcs proto_hdrs RELPATH ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/proto/zmk/matrix_tester/matrix_tester.proto)
+  target_include_directories(${ZEPHYR_CURRENT_LIBRARY} PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
+  target_sources(${ZEPHYR_CURRENT_LIBRARY} PRIVATE ${proto_srcs} ${proto_hdrs})
+  target_include_directories(app PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/proto)
+  add_dependencies(app ${ZEPHYR_CURRENT_LIBRARY})
+endif()

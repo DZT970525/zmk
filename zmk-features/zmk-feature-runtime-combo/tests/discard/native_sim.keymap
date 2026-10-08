@@ -1,0 +1,47 @@
+#include <dt-bindings/zmk/keys.h>
+#include <behaviors.dtsi>
+#include <dt-bindings/zmk/kscan_mock.h>
+
+/*
+ * Exercises zmk_runtime_combo_invalidate_cache() outside of
+ * zmk_runtime_combo_write()/reset() (see runtime_combo_test_setup in
+ * src/runtime_combo/runtime_combo.c, CONFIG_ZMK_RUNTIME_COMBO_TEST_DISCARD
+ * branch):
+ *
+ *   combo 0: positions {0,1} -> key_press(B) (written to memory only)
+ *   combo 1: positions {2,3} -> key_press(C) (written to memory only)
+ *
+ * Both are memory-only writes, so an unscoped
+ * zmk_custom_settings_discard_scope() reverts both back to disabled. Without
+ * zmk_runtime_combo_invalidate_cache() afterwards, the decoded-combo cache
+ * would keep matching positions 0-3 against the now-reverted combos.
+ * Positions 0-3 must therefore bubble through as plain key presses.
+ */
+
+/ {
+    keymap {
+        compatible = "zmk,keymap";
+
+        default_layer {
+            bindings = <
+            &kp K &kp L &kp M &kp N
+            >;
+        };
+    };
+};
+
+&kscan {
+    rows = <1>;
+    columns = <4>;
+    events = <
+    ZMK_MOCK_PRESS(0,0,10)
+    ZMK_MOCK_PRESS(0,1,10)
+    ZMK_MOCK_RELEASE(0,0,10)
+    ZMK_MOCK_RELEASE(0,1,10)
+
+    ZMK_MOCK_PRESS(0,2,10)
+    ZMK_MOCK_PRESS(0,3,10)
+    ZMK_MOCK_RELEASE(0,2,10)
+    ZMK_MOCK_RELEASE(0,3,10)
+    >;
+};

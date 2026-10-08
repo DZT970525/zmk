@@ -35,6 +35,13 @@
 int zmk_split_central_invoke_behavior(uint8_t source, struct zmk_behavior_binding *binding,
                                       struct zmk_behavior_binding_event event, bool state);
 
+/*
+ * Whether every peripheral half is currently connected.  Split features that
+ * need the other half (writing a setting it stores itself, for instance) use
+ * this to report "not connected" instead of pretending it worked.
+ */
+bool zmk_split_central_peripherals_connected(void);
+
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
 
 int zmk_split_central_update_hid_indicator(zmk_hid_indicators_t indicators);

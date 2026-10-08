@@ -1,8 +1,0 @@
-file_format: "1"
-id: left_bbtrackball
-name: left_bbtrackball
-type: shield
-url: 
-requires: 
-features:
-  - mouse

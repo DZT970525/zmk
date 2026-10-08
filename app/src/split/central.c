@@ -5,6 +5,9 @@
  */
 
 #include <errno.h>
+#include <stdbool.h>
+
+#include <zephyr/toolchain.h>
 
 #include <zmk/stdlib.h>
 #include <zmk/split/transport/central.h>
@@ -18,6 +21,7 @@
 #include <zmk/events/battery_state_changed.h>
 #include <zmk/events/position_state_changed.h>
 #include <zmk/events/sensor_event.h>
+#include <zmk/events/split_central_status_changed.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -72,6 +76,16 @@ int zmk_split_transport_central_peripheral_event_handler(
 
         return raise_zmk_sensor_event(sensor_ev);
     }
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+    case ZMK_SPLIT_TRANSPORT_PERIPHERAL_EVENT_TYPE_RELAY_EVENT: {
+        return raise_zmk_relay_event_received((struct zmk_relay_event_received){
+            .source = source,
+            .event_name = ev.data.relay_event.event_type,
+            .event_data = ev.data.relay_event.event_data,
+            .event_data_size = ev.data.relay_event.event_data_size,
+        });
+    }
+#endif // IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
     default:
         LOG_WRN("GOT AN UNKNOWN EVENT TYPE %d", ev.type);
         return -ENOTSUP;
@@ -198,18 +212,28 @@ static int select_first_available_transport(void) {
 
 static int transport_status_changed_cb(const struct zmk_split_transport_central *central,
                                        struct zmk_split_transport_status status) {
+    int ret = 0;
+
     if (central == active_transport) {
         LOG_DBG("Central at %p changed status: enabled %d, available %d, connections %d", central,
                 status.enabled, status.available, status.connections);
         if (status.connections == ZMK_SPLIT_TRANSPORT_CONNECTIONS_STATUS_DISCONNECTED) {
-            return select_first_available_transport();
+            ret = select_first_available_transport();
         }
     } else {
         // Just to be sure, in case a higher priority transport becomes available
-        select_first_available_transport();
+        ret = select_first_available_transport();
     }
 
-    return 0;
+    /*
+     * Tell the rest of the firmware (Studio features in particular) whether the
+     * other half is reachable right now, so nobody has to poll for it.
+     */
+    raise_zmk_split_central_status_changed((struct zmk_split_central_status_changed){
+        .connected = zmk_split_central_peripherals_connected(),
+    });
+
+    return ret;
 }
 
 static int central_init(void) {
@@ -225,3 +249,49 @@ static int central_init(void) {
 }
 
 SYS_INIT(central_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+
+bool zmk_split_central_peripherals_connected(void) {
+    if (!active_transport || !active_transport->api || !active_transport->api->get_status) {
+        // A transport without a status is assumed to always be connected.
+        return active_transport != NULL;
+    }
+
+    return active_transport->api->get_status().connections !=
+           ZMK_SPLIT_TRANSPORT_CONNECTIONS_STATUS_DISCONNECTED;
+}
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+
+int zmk_split_relay_event_send(const struct zmk_split_relay_event_payload *payload) {
+    if (!active_transport || !active_transport->api || !active_transport->api->send_command ||
+        !active_transport->api->get_available_source_ids) {
+        LOG_WRN("No split transport able to relay events");
+        return -ENODEV;
+    }
+
+    uint8_t source_ids[ZMK_SPLIT_CENTRAL_PERIPHERAL_COUNT];
+    int count = active_transport->api->get_available_source_ids(source_ids);
+    if (count < 0) {
+        return count;
+    }
+
+    struct zmk_split_transport_central_command command = {
+        .type = ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_RELAY_EVENT,
+        .data = {.relay_event = *payload},
+    };
+
+    int ret = -ENODEV;
+    for (int i = 0; i < count; i++) {
+        int err = active_transport->api->send_command(source_ids[i], command);
+        if (err < 0) {
+            LOG_WRN("Failed to relay event to peripheral %d (err %d)", source_ids[i], err);
+            ret = err;
+        } else {
+            ret = 0;
+        }
+    }
+
+    return ret;
+}
+
+#endif // IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)

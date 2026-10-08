@@ -1,0 +1,79 @@
+#include <dt-bindings/zmk/keys.h>
+#include <behaviors.dtsi>
+#include <dt-bindings/zmk/kscan_mock.h>
+
+/*
+ * Exercises the storage v3 per-combo overrides and native-parity overlap
+ * resolution added by CONFIG_ZMK_RUNTIME_COMBO_TEST (see
+ * runtime_combo_test_setup in src/runtime_combo/runtime_combo.c):
+ *
+ *   combo 0: positions {0,1}   -> key_press(B)  (regression, unchanged)
+ *   combo 1: positions {2,3}   -> key_press(C)  (subset of combo 2)
+ *   combo 2: positions {2,3,4} -> key_press(D)  (superset of combo 1)
+ *   combo 3: positions {5,6}   -> key_press(E)  (require-prior-idle-ms=1000)
+ *   combo 4: positions {7,8}   -> key_press(F)  (timeout-ms=1000, global default is 50)
+ *
+ * Position 9 (key_press(T)) is a plain, non-combo control key used to set
+ * up the require-prior-idle check for combo 3.
+ */
+
+/ {
+    keymap {
+        compatible = "zmk,keymap";
+
+        default_layer {
+            bindings = <
+            &kp K &kp L &kp M &kp N &kp O &kp P &kp Q &kp R &kp S &kp T
+            >;
+        };
+    };
+};
+
+&kscan {
+    rows = <1>;
+    columns = <10>;
+    events = <
+    /* combo 0 regression: positions 0,1 -> B */
+    ZMK_MOCK_PRESS(0,0,10)
+    ZMK_MOCK_PRESS(0,1,10)
+    ZMK_MOCK_RELEASE(0,0,10)
+    ZMK_MOCK_RELEASE(0,1,10)
+
+    /* overlap resolution: press all of 2,3,4 -> only the superset combo D fires */
+    ZMK_MOCK_PRESS(0,2,10)
+    ZMK_MOCK_PRESS(0,3,10)
+    ZMK_MOCK_PRESS(0,4,10)
+    ZMK_MOCK_RELEASE(0,2,10)
+    ZMK_MOCK_RELEASE(0,3,10)
+    ZMK_MOCK_RELEASE(0,4,10)
+
+    /* overlap resolution: press 2,3 then release before 4 -> subset combo C fires */
+    ZMK_MOCK_PRESS(0,2,10)
+    ZMK_MOCK_PRESS(0,3,10)
+    ZMK_MOCK_RELEASE(0,2,10)
+    ZMK_MOCK_RELEASE(0,3,10)
+
+    /* tap an unrelated key, then quickly attempt combo 3 (5,6): suppressed by
+     * its require-prior-idle-ms override even though the global setting is
+     * disabled, so T/P/Q pass through as regular key presses */
+    ZMK_MOCK_PRESS(0,9,10)
+    ZMK_MOCK_RELEASE(0,9,20)
+    ZMK_MOCK_PRESS(0,5,10)
+    ZMK_MOCK_PRESS(0,6,10)
+    ZMK_MOCK_RELEASE(0,5,10)
+    ZMK_MOCK_RELEASE(0,6,1300)
+
+    /* well past the idle window now: combo 3 (5,6) fires -> E */
+    ZMK_MOCK_PRESS(0,5,10)
+    ZMK_MOCK_PRESS(0,6,10)
+    ZMK_MOCK_RELEASE(0,5,10)
+    ZMK_MOCK_RELEASE(0,6,50)
+
+    /* combo 4 (7,8): 250ms gap exceeds the 50ms global default but stays
+     * within its own 1000ms override -> F still fires */
+    ZMK_MOCK_PRESS(0,7,250)
+    ZMK_MOCK_PRESS(0,8,10)
+    ZMK_MOCK_RELEASE(0,7,10)
+    ZMK_MOCK_RELEASE(0,8,10)
+    >;
+};

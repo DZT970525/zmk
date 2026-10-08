@@ -1,0 +1,140 @@
+syntax = "proto3";
+
+package zitaotech.screen;
+
+/*
+ * Configuration for the right half's picture carousel, plus what the right
+ * half last reported showing.  The carousel itself runs on the peripheral, so
+ * every write here is mirrored to it.
+ */
+
+message GetStateRequest {}
+
+// Omitted fields keep their current value.
+message SetConfigRequest {
+    optional uint32 interval_s = 1;
+    optional uint32 enabled_mask = 2;
+    optional uint32 interval_ms = 3;
+    optional bool sequential = 4;
+    bytes playback_order = 5; // Ten IDs packed high nibble first.
+}
+
+message ResetRequest {}
+
+/*
+ * The user pictures the keyboard holds.  Each one is identified by its CRC32,
+ * so the web UI can tell whether the copy it has cached locally is the same
+ * picture the keyboard has, without transferring the bitmap again.
+ */
+message ImageInfo {
+    uint32 slot = 1;
+    uint32 crc32 = 2;
+    uint32 size = 3;
+    // 0 = 4bpp RGB111, 1 = 1bpp black and white.
+    uint32 format = 4;
+}
+
+message ImageListRequest {}
+
+message ImageListResponse {
+    repeated ImageInfo images = 1;
+}
+
+/*
+ * Store a picture chunk by chunk: the web UI sends the bitmap in small pieces
+ * (the Studio request frame is tiny), the last one stores it.  The reply
+ * carries the CRC the firmware computed, so the client can check that what it
+ * sent is what the keyboard kept.
+ */
+message ImageWriteRequest {
+    uint32 slot = 1;
+    uint32 format = 2;
+    uint32 total_size = 3;
+    uint32 offset = 4;
+    bytes data = 5;
+}
+
+message ImageWriteResponse {
+    uint32 slot = 1;
+    uint32 crc32 = 2;
+    bool stored = 3;
+}
+
+message ImageEraseRequest {
+    uint32 slot = 1;
+    bool both_halves = 2;
+}
+message ImageReadRequest { uint32 slot = 1; uint32 offset = 2; }
+message ImageReadResponse { uint32 slot = 1; uint32 offset = 2; uint32 crc32 = 3; bytes data = 4; }
+
+message ImageSyncRequest { uint32 slot = 1; }
+message GetImageTransferRequest {}
+message GetUsbImageStatusRequest {}
+message UsbImageStatus { bool active = 1; bool stored = 2; uint32 token = 3; uint32 op = 4; uint32 slot = 5; uint32 received = 6; uint32 total = 7; uint32 crc32 = 8; sint32 error = 9; }
+message ImageTransferState {
+ bool active = 1; uint32 slot = 2; uint32 sent = 3; uint32 total = 4;
+ uint32 crc32 = 5; sint32 error = 6;
+}
+
+message Request {
+    oneof request_type {
+        GetStateRequest get_state = 1;
+        SetConfigRequest set_config = 2;
+        ResetRequest reset = 3;
+        ImageListRequest image_list = 4;
+        ImageWriteRequest image_write = 5;
+        ImageSyncRequest image_sync = 7;
+        GetImageTransferRequest get_image_transfer = 8;
+        ImageReadRequest image_read = 9;
+        GetUsbImageStatusRequest get_usb_image_status = 10;
+        ImageEraseRequest image_erase = 6;
+    }
+}
+
+message State {
+    uint32 interval_s = 1;
+    uint32 interval_min = 2;
+    uint32 interval_max = 3;
+    uint32 enabled_mask = 4;
+    uint32 picture_count = 5;
+    // Reported by the right half; it is the one drawing the carousel.
+    bool right_connected = 6;
+    uint32 right_interval_s = 7;
+    uint32 right_applied_mask = 8;
+    bool image_transfer_supported = 9;
+    bool image_management_supported = 10;
+    bool usb_image_upload_supported = 11;
+    uint32 interval_ms = 12;
+    bool sequential = 13;
+    bytes playback_order = 14;
+    bool playback_supported = 15;
+    uint32 right_interval_ms = 16;
+    bool right_sequential = 17;
+    bytes right_playback_order = 18;
+}
+
+message Ok {}
+
+message Error {
+    string message = 1;
+}
+
+message Response {
+    oneof response_type {
+        State state = 1;
+        Ok ok = 2;
+        Error error = 3;
+        ImageListResponse image_list = 4;
+        ImageWriteResponse image_write = 5;
+        ImageTransferState image_transfer = 6;
+        ImageReadResponse image_read = 7;
+        UsbImageStatus usb_image_status = 8;
+    }
+}
+
+// Pushed when the configuration changes, so the web UI follows along.
+message Notification {
+    State state = 1;
+}
+
+

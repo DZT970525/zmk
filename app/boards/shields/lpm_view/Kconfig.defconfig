@@ -3,17 +3,20 @@
 
 if SHIELD_LPM_VIEW
 config LV_Z_VDB_SIZE
-    default 100
+    default 50
 
 config LV_DPI_DEF
     default 144
 
 config LV_Z_BITS_PER_PIXEL
-    default 1
+    default 16
 
 choice LV_COLOR_DEPTH
-    default LV_COLOR_DEPTH_1
+    default LV_COLOR_DEPTH_16
 endchoice
+
+config LV_COLOR_16_SWAP
+    default n
 
 choice ZMK_DISPLAY_WORK_QUEUE
     default ZMK_DISPLAY_WORK_QUEUE_DEDICATED

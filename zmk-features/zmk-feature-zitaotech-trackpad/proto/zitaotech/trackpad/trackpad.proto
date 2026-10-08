@@ -1,0 +1,205 @@
+syntax = "proto3";
+
+package zitaotech.trackpad;
+
+// What the trackpad does when no mode key is held.  The direction/pointer mode
+// key (mode_keys.arrow_key) switches to the *other* mode while it is held, so
+// the same key means "direction mode" on a pointer-mode keyboard and "pointer
+// mode" on a direction-mode keyboard.
+enum TrackpadMode {
+  TRACKPAD_MODE_POINTER = 0;
+  TRACKPAD_MODE_ARROW = 1;
+}
+
+// Requests ---------------------------------------------------------------
+
+message GetStateRequest {
+}
+
+message SetDpiRequest {
+  // Zero-based DPI step index (0 = slowest). The firmware clamps it.
+  uint32 dpi_index = 1;
+}
+
+message SetScrollSpeedRequest {
+  // Multiplier applied to the trackpad's scroll scale, in percent.
+  uint32 speed_percent = 1;
+}
+
+message SetScrollDirectionRequest {
+  bool invert_x = 1;
+  bool invert_y = 2;
+}
+
+message SetBurstRequest {
+  // Burst mode multiplies the pointer speed on top of the DPI step.
+  bool enabled = 1;
+  // x1 .. x10 (clamped by the firmware).
+  uint32 multiplier = 2;
+}
+
+// One entry per assignable mode key; -1 means "no key assigned".
+message ModeKeys {
+  int32 arrow_key = 1;
+  int32 fast_key = 2;
+  int32 slow_key = 3;
+  int32 scroll_key = 4;
+}
+
+message SetModeKeysRequest {
+  // Absolute assignment: the UI sends all four positions it wants, using -1 to
+  // clear one.
+  ModeKeys keys = 1;
+}
+
+message SetModeRequest {
+  TrackpadMode mode = 1;
+}
+
+message SetModeSwitchEnabledRequest {
+  // Whether the mode-switch key (&TP on layer 2's X key) may toggle between
+  // pointer and direction mode.  Off until the user turns it on.
+  bool enabled = 1;
+}
+
+message SetSmoothScrollRequest {
+  bool enabled = 1;
+}
+
+// Caps Lock scrolling: on by default, matching the stock Q10 firmware.
+message SetCapsLockScrollRequest {
+  bool enabled = 1;
+}
+
+message SetArrowSwipeThresholdRequest {
+  // Lower needs less finger travel, i.e. is more sensitive.
+  uint32 threshold = 1;
+}
+
+// Automatic mouse layer: hold a layer while a finger is on the trackpad, so
+// the mouse buttons can be pressed with keys instead of the pad itself.
+message SetMouseLayerRequest {
+  bool enabled = 1;
+}
+
+// How long the trackpad counts as touched after the last movement (ms).
+message SetTouchOnMsRequest {
+  uint32 ms = 1;
+}
+
+// How long the automatic mouse layer stays up after the last movement from
+// this source, in ms.  Independent of touch_on_ms, which also drives the LED.
+message SetMouseLayerMsRequest {
+  uint32 ms = 1;
+}
+
+// The same automatic mouse layer, triggered by the TrackPoint half.  The layer
+// itself lives on this (the central) half, so its settings are stored here too
+// even though the motion arrives over the split link.
+message SetTrackpointMouseLayerRequest {
+  bool enabled = 1;
+}
+
+message SetTrackpointMouseLayerMsRequest {
+  uint32 ms = 1;
+}
+
+message SetScrollBurstRequest {
+  bool enabled = 1;
+  // x1 .. x5 (clamped by the firmware).
+  uint32 multiplier = 2;
+}
+
+message ResetRequest {
+}
+
+message Request {
+  oneof request_type {
+    GetStateRequest get_state = 1;
+    SetDpiRequest set_dpi = 2;
+    SetScrollSpeedRequest set_scroll_speed = 3;
+    SetScrollDirectionRequest set_scroll_direction = 4;
+    ResetRequest reset = 5;
+    SetBurstRequest set_burst = 6;
+    SetModeKeysRequest set_mode_keys = 7;
+    SetSmoothScrollRequest set_smooth_scroll = 8;
+    SetArrowSwipeThresholdRequest set_arrow_swipe_threshold = 9;
+    SetScrollBurstRequest set_scroll_burst = 10;
+    SetCapsLockScrollRequest set_caps_lock_scroll = 11;
+    SetMouseLayerRequest set_mouse_layer = 12;
+    SetTouchOnMsRequest set_touch_on_ms = 13;
+    SetModeRequest set_mode = 14;
+    SetModeSwitchEnabledRequest set_mode_switch_enabled = 15;
+    SetMouseLayerMsRequest set_mouse_layer_ms = 16;
+    SetTrackpointMouseLayerRequest set_trackpoint_mouse_layer = 17;
+    SetTrackpointMouseLayerMsRequest set_trackpoint_mouse_layer_ms = 18;
+  }
+}
+
+// Responses --------------------------------------------------------------
+
+message State {
+  bool supported = 1;
+  string driver_name = 2;
+  uint32 dpi_index = 3;
+  uint32 dpi_value = 4;
+  uint32 dpi_min = 5;
+  uint32 dpi_max = 6;
+  uint32 dpi_step = 7;
+  uint32 dpi_levels = 8;
+  uint32 scroll_speed_percent = 9;
+  uint32 scroll_speed_min = 10;
+  uint32 scroll_speed_max = 11;
+  bool scroll_invert_x = 12;
+  bool scroll_invert_y = 13;
+  bool burst_enabled = 14;
+  uint32 burst_multiplier = 15;
+  uint32 burst_multiplier_max = 16;
+  ModeKeys mode_keys = 17;
+  bool smooth_scroll_enabled = 18;
+  uint32 arrow_swipe_threshold = 19;
+  uint32 arrow_swipe_threshold_min = 20;
+  uint32 arrow_swipe_threshold_max = 21;
+  bool scroll_burst_enabled = 22;
+  uint32 scroll_burst_multiplier = 23;
+  uint32 scroll_burst_multiplier_max = 24;
+  bool caps_lock_scroll_enabled = 25;
+  bool mouse_layer_enabled = 26;
+  uint32 touch_on_ms = 27;
+  uint32 touch_on_ms_min = 28;
+  uint32 touch_on_ms_max = 29;
+  // Mode the trackpad starts in (see TrackpadMode).
+  TrackpadMode mode = 30;
+  // Whether the mode-switch key is allowed to toggle the mode.
+  bool mode_switch_enabled = 31;
+  // Automatic mouse layer timings and the TrackPoint half's own switch.
+  uint32 mouse_layer_ms = 32;
+  uint32 mouse_layer_ms_min = 33;
+  uint32 mouse_layer_ms_max = 34;
+  bool trackpoint_mouse_layer_enabled = 35;
+  uint32 trackpoint_mouse_layer_ms = 36;
+  // Layer the automatic mouse layer lives on. Each board's keymap decides the
+  // number (3 on the SOFLE), so the UI can name it correctly.
+  uint32 mouse_layer = 37;
+}
+
+message Ok {
+}
+
+message Error {
+  string message = 1;
+}
+
+message Response {
+  oneof response_type {
+    State state = 1;
+    Ok ok = 2;
+    Error error = 3;
+  }
+}
+
+// Pushed by the keyboard whenever a setting changes on the device itself
+// (e.g. the &DPI keys), so the web UI updates without polling.
+message Notification {
+  State state = 1;
+}

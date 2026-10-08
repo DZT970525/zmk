@@ -1,0 +1,2 @@
+zmk.custom.CustomSubsystemInfo.identifier max_size:@CONFIG_ZMK_STUDIO_RPC_CUSTOM_SUBSYSTEM_IDENTIFIER_MAX_LEN@ fixed_length:true
+zmk.custom.CallRequest.payload max_size:@CONFIG_ZMK_STUDIO_RPC_CUSTOM_SUBSYSTEM_REQUEST_PAYLOAD_MAX_BYTES@

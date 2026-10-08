@@ -1,0 +1,24 @@
+# List of this module's dependencies for testing
+manifest:
+  remotes:
+    - name: zmkfirmware
+      url-base: https://github.com/zmkfirmware
+    - name: cormoran
+      url-base: https://github.com/cormoran
+  projects:
+    - name: zmk
+      remote: cormoran
+      revision: main+custom-studio-protocol
+      import:
+        file: app/west.yml
+      clone-depth: 1
+    - name: zmk-west-commands
+      remote: cormoran
+      revision: main
+      import: true
+    # Used only by tests/zmk-config to make manual real-hardware
+    # verification easier (switch/unpair BLE profiles from a web UI instead
+    # of key combos) - not a functional dependency of this module.
+    - name: zmk-module-ble-management
+      remote: cormoran
+      revision: main

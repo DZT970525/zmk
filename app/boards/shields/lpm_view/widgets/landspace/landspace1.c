@@ -94,10 +94,9 @@ const LV_ATTRIBUTE_MEM_ALIGN LV_ATTRIBUTE_LARGE_CONST LV_ATTRIBUTE_IMG_LANDSPACE
         0x00, 0x01, 0x7e, 0xe0, 0x00, 0x10, 0x0e, 0x07, 0xf9, 0x07, 0xc0, 0x00, 0x0f, 0xe0, 0x0f,
 };
 
-const lv_img_dsc_t landspace1 = {
-    .header.cf = LV_IMG_CF_INDEXED_1BIT,
-    .header.always_zero = 0,
-    .header.reserved = 0,
+const lv_image_dsc_t landspace1 = {
+    .header.magic = LV_IMAGE_HEADER_MAGIC,
+    .header.cf = LV_COLOR_FORMAT_I1,
     .header.w = 120,
     .header.h = 72,
     .data_size = 1088,

@@ -1,0 +1,28 @@
+# Roles + names for the usb+wired custom-settings split. The central (left)
+# fronts the custom-settings split RPC relay and answers Studio over USB; the
+# peripheral (right) runs the relay's peripheral role. Split transport is WIRED
+# -- BLE is disabled in the .conf files.
+
+if SHIELD_CUSTOM_SETTINGS_USB_WIRED_SPLIT_LEFT
+
+config ZMK_KEYBOARD_NAME
+    default "CS UWCentral"
+
+config ZMK_SPLIT_ROLE_CENTRAL
+    default y
+
+endif
+
+if SHIELD_CUSTOM_SETTINGS_USB_WIRED_SPLIT_RIGHT
+
+config ZMK_KEYBOARD_NAME
+    default "CS UWPeriph"
+
+endif
+
+if SHIELD_CUSTOM_SETTINGS_USB_WIRED_SPLIT_LEFT || SHIELD_CUSTOM_SETTINGS_USB_WIRED_SPLIT_RIGHT
+
+config ZMK_SPLIT
+    default y
+
+endif

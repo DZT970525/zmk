@@ -1,0 +1,207 @@
+config ZITAOTECH_TRACKPAD_CONTROL
+    bool "ZitaoTech trackpad control (runtime DPI / scroll)"
+    select SETTINGS
+    help
+      Runtime-adjustable trackpad settings for ZitaoTech boards (Q10/Q20):
+      pointer speed (DPI steps), scroll speed and scroll direction. Values are
+      persisted with ZMK's settings subsystem and exposed to ZitaoTech Studio
+      through a custom Studio RPC subsystem.
+
+if ZITAOTECH_TRACKPAD_CONTROL
+
+config ZITAOTECH_TRACKPAD_CONTROL_STUDIO_RPC
+    bool "Enable ZitaoTech trackpad custom Studio RPC"
+    depends on ZMK_STUDIO
+
+# Reported to the web UI; keeps the UI able to show which driver is in charge.
+config ZITAOTECH_TRACKPAD_DRIVER_NAME
+    string "Trackpad driver name reported to Studio"
+    default "Touchpad"
+
+config ZITAOTECH_TRACKPAD_DPI_MIN
+    int "Lowest DPI step value"
+    default 1
+
+config ZITAOTECH_TRACKPAD_DPI_MAX
+    int "Highest DPI step value"
+    default 100
+
+config ZITAOTECH_TRACKPAD_DPI_STEP
+    int "DPI value change per step"
+    default 1
+
+config ZITAOTECH_TRACKPAD_DPI_DEFAULT
+    int "DPI value at first boot"
+    default 40
+
+config ZITAOTECH_TRACKPAD_SCROLL_SPEED_MIN
+    int "Lowest scroll speed multiplier, in percent"
+    default 25
+
+config ZITAOTECH_TRACKPAD_SCROLL_SPEED_MAX
+    int "Highest scroll speed multiplier, in percent"
+    default 300
+
+config ZITAOTECH_TRACKPAD_SCROLL_SPEED_DEFAULT
+    int "Scroll speed multiplier at first boot, in percent"
+    default 100
+
+config ZITAOTECH_TRACKPAD_BURST_MAX
+    int "Highest burst-mode pointer speed multiplier"
+    default 10
+    range 2 10
+    help
+      Burst mode multiplies the pointer speed on top of the DPI step, for
+      quickly crossing a screen without leaving the comfortable DPI setting.
+
+config ZITAOTECH_TRACKPAD_SCROLL_BURST_MAX
+    int "Highest scroll burst multiplier"
+    default 10
+    range 2 10
+    help
+      Scroll burst multiplies the scroll speed, for flicking through long
+      documents without changing the normal scroll speed.
+
+config ZITAOTECH_TRACKPAD_ARROW_SWIPE_THRESHOLD
+    int "Direction-mode swipe threshold (default)"
+    default 34
+    range 5 200
+    help
+      How far a finger has to travel before the trackpad emits an arrow key in
+      direction mode. Lower is more sensitive, higher needs a firmer swipe.
+
+config ZITAOTECH_TRACKPAD_ARROW_SWIPE_MIN
+    int "Lowest selectable swipe threshold"
+    default 5
+
+config ZITAOTECH_TRACKPAD_ARROW_SWIPE_MAX
+    int "Highest selectable swipe threshold"
+    default 120
+
+config ZITAOTECH_TRACKPAD_TOUCH_ON_MS
+    int "How long the trackpad stays 'touched' after the last movement (ms)"
+    default 1000
+    range 100 10000
+    help
+      How long the trackpad LED stays lit after the last movement, and how long
+      the automatic mouse layer stays active after the finger leaves the pad.
+      ZitaoTech Studio can change it at runtime; this is the value a factory
+      reset returns to.
+
+config ZITAOTECH_TRACKPAD_TOUCH_ON_MIN
+    int "Lowest selectable touch time (ms)"
+    default 100
+
+config ZITAOTECH_TRACKPAD_TOUCH_ON_MAX
+    int "Highest selectable touch time (ms)"
+    default 10000
+
+config ZITAOTECH_TRACKPAD_MOUSE_LAYER
+    int "Keymap layer used as the automatic mouse layer"
+    default 4
+    help
+      Layer index the firmware activates while a finger is on the trackpad and
+      the automatic mouse layer is switched on in ZitaoTech Studio. The board
+      keymap is expected to define that layer with transparent bindings plus
+      the mouse button overrides (left click on Q, right click on the rightmost
+      key of the top row).
+
+config ZITAOTECH_TRACKPAD_MOUSE_LAYER_DEFAULT
+    bool "Automatic mouse layer switched on at first boot"
+    default y
+    help
+      Value the automatic mouse layer returns to on a factory reset and before
+      ZitaoTech Studio has ever stored a choice.  The trackpad and the
+      TrackPoint each have their own switch; this is the trackpad's, and it is
+      on by default.
+
+config ZITAOTECH_TRACKPAD_MOUSE_LAYER_MS
+    int "How long the trackpad mouse layer stays up after movement (ms)"
+    default 800
+    range 100 10000
+    help
+      Time the automatic mouse layer stays active after the last trackpad
+      movement.  Kept separate from the touch/LED time so either can be tuned
+      on its own; ZitaoTech Studio changes it at runtime and a factory reset
+      returns to this value.
+
+config ZITAOTECH_TRACKPAD_TRACKPOINT_MOUSE_LAYER_DEFAULT
+    bool "TrackPoint automatic mouse layer switched on at first boot"
+    default y
+    help
+      The TrackPoint half of the automatic mouse layer.  Its motion reaches
+      this (the central) half over the split link; the layer it activates is
+      the same one the trackpad uses.
+
+config ZITAOTECH_TRACKPAD_TRACKPOINT_MOUSE_LAYER_MS
+    int "How long the TrackPoint mouse layer stays up after movement (ms)"
+    default 800
+    range 100 10000
+
+config ZITAOTECH_TRACKPAD_MOUSE_LAYER_CONTROL
+    bool "Let Studio switch the automatic mouse layer and its timeout"
+    depends on ZMK_INPUT_PROCESSOR_TEMP_LAYER
+    help
+      Take over the &zip_temp_layer instance bound to
+      ZITAOTECH_TRACKPAD_MOUSE_LAYER: the layer is only activated while the
+      automatic mouse layer is switched on in ZitaoTech Studio, and its timeout
+      follows the touch time instead of the devicetree value. Temporary layers
+      on other layer indices keep their devicetree behaviour.
+
+config ZITAOTECH_TRACKPAD_MOUSE_LAYER_EXIT_ON_KEY
+    bool "Leave the automatic mouse layer when a normal key is pressed"
+    default y
+    depends on ZITAOTECH_TRACKPAD_MOUSE_LAYER_CONTROL
+    help
+      While the automatic mouse layer is up, pressing any real keyboard key
+      (Caps Lock, a modifier, a letter, ...) drops the layer straight away and
+      returns to the base layer.  Mouse buttons do not count - they are not
+      keycodes - so dragging keeps the layer.  The layer comes back the next
+      time the trackpad is touched, once the touch has ended.
+
+config ZITAOTECH_TRACKPAD_SMOOTH_SCROLL_INTERVAL_MS
+    int "Smooth-scrolling tick interval (ms)"
+    default 8
+    range 2 40
+    help
+      With smooth scrolling on, a burst of wheel notches is spread over
+      successive reports, one notch per interval, instead of being sent in a
+      single jump.
+
+config ZITAOTECH_TRACKPAD_SMOOTH_SCROLL_SPEED_PERCENT
+    int "Smooth-scrolling speed (% of normal)"
+    default 70
+    range 10 200
+    help
+      Smooth scrolling runs a little slower than the stepped mode so the
+      difference is felt: this percentage scales the scroll distance while
+      smooth scrolling is on.
+
+# Keymap positions that drive the trackpad's modes while held. -1 = unbound.
+config ZITAOTECH_TRACKPAD_ARROW_KEY_POSITION
+    int "Direction-mode key position (-1 disables)"
+    default 27
+
+config ZITAOTECH_TRACKPAD_FAST_KEY_POSITION
+    int "Fast-mode key position (-1 disables)"
+    default 37
+
+config ZITAOTECH_TRACKPAD_SLOW_KEY_POSITION
+    int "Slow-mode key position (-1 disables)"
+    default 38
+
+config ZITAOTECH_TRACKPAD_SCROLL_KEY_POSITION
+    int "Scroll-mode key position (-1 disables)"
+    default -1
+    help
+      Holding this key makes the trackpad scroll, exactly like Caps Lock does
+      on the stock Q10 firmware.
+
+config ZITAOTECH_TRACKPAD_SAVE_DEBOUNCE_MS
+    int "Delay before pending trackpad settings are written to flash (ms)"
+    default 1000
+    help
+      Changes are kept in RAM and written once the value has been stable for
+      this long, so holding a DPI key does not mean one flash write per step.
+
+endif # ZITAOTECH_TRACKPAD_CONTROL

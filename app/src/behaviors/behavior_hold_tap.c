@@ -9,7 +9,6 @@
 #include <zephyr/device.h>
 #include <drivers/behavior.h>
 #include <zmk/keys.h>
-#include <dt-bindings/zmk/keys.h>
 #include <zephyr/logging/log.h>
 #include <zmk/behavior.h>
 #include <zmk/matrix.h>
@@ -62,6 +61,7 @@ struct behavior_hold_tap_config {
     bool hold_while_undecided;
     bool hold_while_undecided_linger;
     bool retro_tap;
+    bool priority_layer_hold;
     bool hold_trigger_on_release;
     int32_t hold_trigger_key_positions_len;
     int32_t hold_trigger_key_positions[];
@@ -86,6 +86,9 @@ struct active_hold_tap {
     const struct behavior_hold_tap_config *config;
     struct k_work_delayable work;
     bool work_is_cancelled;
+    bool scroll_consumed;
+    bool tap_started;
+
 
     // initialized to -1, which is to be interpreted as "no other key has been pressed yet"
     int32_t position_of_first_other_key_pressed;
@@ -98,6 +101,28 @@ struct active_hold_tap {
 // its key-up has been processed and the delayed work is cleaned up.
 struct active_hold_tap *undecided_hold_tap = NULL;
 struct active_hold_tap active_hold_taps[ZMK_BHV_HOLD_TAP_MAX_HELD] = {};
+// Only the existing mouse layer tap promotes its held layer; other MO keys keep stock priority.
+int zmk_keymap_hold_tap_priority_layer(void) {
+    for (int i = 0; i < ZMK_BHV_HOLD_TAP_MAX_HELD; i++) {
+        struct active_hold_tap *ht = &active_hold_taps[i];
+        if (ht->position != ZMK_BHV_HOLD_TAP_POSITION_NOT_USED && ht->config &&
+            ht->config->priority_layer_hold &&
+            (ht->status == STATUS_HOLD_INTERRUPT || ht->status == STATUS_HOLD_TIMER)) {
+            return ht->param_hold;
+        }
+    }
+    return -1;
+}
+/* A wheel report consumes only the mouse hold-tap at the scroll-mode position. */
+void zmk_hold_tap_consume_scroll(int32_t position) {
+    for (int i = 0; i < ZMK_BHV_HOLD_TAP_MAX_HELD; i++) {
+        struct active_hold_tap *ht = &active_hold_taps[i];
+        if (ht->position == position && ht->config && ht->config->priority_layer_hold &&
+            !ht->tap_started) {
+            ht->scroll_consumed = true;
+        }
+    }
+}
 // We capture most position_state_changed events and some modifiers_state_changed events.
 
 enum captured_event_tag {
@@ -265,10 +290,13 @@ static struct active_hold_tap *store_hold_tap(struct zmk_behavior_binding_event 
 #endif
         active_hold_taps[i].status = STATUS_UNDECIDED;
         active_hold_taps[i].config = config;
+
         active_hold_taps[i].param_hold = param_hold;
         active_hold_taps[i].param_tap = param_tap;
         active_hold_taps[i].timestamp = event->timestamp;
         active_hold_taps[i].position_of_first_other_key_pressed = -1;
+        active_hold_taps[i].scroll_consumed = false;
+        active_hold_taps[i].tap_started = false;
         return &active_hold_taps[i];
     }
     return NULL;
@@ -410,12 +438,16 @@ static int press_hold_binding(struct active_hold_tap *hold_tap) {
 #endif
     };
 
-    struct zmk_behavior_binding binding = {.behavior_dev = hold_tap->config->hold_behavior_dev,
+    struct zmk_behavior_binding binding = {.behavior_dev = hold_tap->config->priority_layer_hold ?
+                                               DEVICE_DT_NAME(DT_NODELABEL(force_layer)) :
+                                               hold_tap->config->hold_behavior_dev,
                                            .param1 = hold_tap->param_hold};
     return zmk_behavior_invoke_binding(&binding, event, true);
 }
 
 static int press_tap_binding(struct active_hold_tap *hold_tap) {
+    if (hold_tap->scroll_consumed) { return 0; }
+    hold_tap->tap_started = true;
     struct zmk_behavior_binding_event event = {
         .position = hold_tap->position,
         .timestamp = hold_tap->timestamp,
@@ -439,12 +471,15 @@ static int release_hold_binding(struct active_hold_tap *hold_tap) {
 #endif
     };
 
-    struct zmk_behavior_binding binding = {.behavior_dev = hold_tap->config->hold_behavior_dev,
+    struct zmk_behavior_binding binding = {.behavior_dev = hold_tap->config->priority_layer_hold ?
+                                               DEVICE_DT_NAME(DT_NODELABEL(force_layer)) :
+                                               hold_tap->config->hold_behavior_dev,
                                            .param1 = hold_tap->param_hold};
     return zmk_behavior_invoke_binding(&binding, event, false);
 }
 
 static int release_tap_binding(struct active_hold_tap *hold_tap) {
+    if (!hold_tap->tap_started) { return 0; }
     struct zmk_behavior_binding_event event = {
         .position = hold_tap->position,
         .timestamp = hold_tap->timestamp,
@@ -543,7 +578,7 @@ static void decide_hold_tap(struct active_hold_tap *hold_tap,
     }
 
     // If the hold-tap behavior is still undecided, attempt to decide it.
-    switch (hold_tap->config->flavor) {
+    switch (hold_tap->config->priority_layer_hold ? FLAVOR_HOLD_PREFERRED : hold_tap->config->flavor) {
     case FLAVOR_HOLD_PREFERRED:
         decide_hold_preferred(hold_tap, decision_moment);
         break;
@@ -857,6 +892,12 @@ static int behavior_hold_tap_init(const struct device *dev) {
     return 0;
 }
 
+#if DT_NODE_EXISTS(DT_NODELABEL(mouse_lt))
+#define MOUSE_PRIORITY_HOLD(n) DT_SAME_NODE(DT_DRV_INST(n), DT_NODELABEL(mouse_lt))
+#else
+#define MOUSE_PRIORITY_HOLD(n) 0
+#endif
+
 #define KP_INST(n)                                                                                 \
     static const struct behavior_hold_tap_config behavior_hold_tap_config_##n = {                  \
         .tapping_term_ms = DT_INST_PROP(n, tapping_term_ms),                                       \
@@ -869,6 +910,7 @@ static int behavior_hold_tap_init(const struct device *dev) {
         .flavor = DT_ENUM_IDX(DT_DRV_INST(n), flavor),                                             \
         .hold_while_undecided = DT_INST_PROP(n, hold_while_undecided),                             \
         .hold_while_undecided_linger = DT_INST_PROP(n, hold_while_undecided_linger),               \
+        .priority_layer_hold = MOUSE_PRIORITY_HOLD(n),                                      \
         .retro_tap = DT_INST_PROP(n, retro_tap),                                                   \
         .hold_trigger_on_release = DT_INST_PROP(n, hold_trigger_on_release),                       \
         .hold_trigger_key_positions = DT_INST_PROP(n, hold_trigger_key_positions),                 \

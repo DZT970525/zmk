@@ -22,8 +22,8 @@ config ZMK_SPLIT_ROLE_CENTRAL
     select BT_SCAN_WITH_IDENTITY
 
 # Bump this value needed for concurrent GATT discovery of splits
-config BT_L2CAP_TX_BUF_COUNT
-    default 5 if ZMK_SPLIT_ROLE_CENTRAL
+config BT_ATT_TX_COUNT
+    default 10 if ZMK_SPLIT_ROLE_CENTRAL
 
 if ZMK_SPLIT_ROLE_CENTRAL
 
@@ -101,6 +101,17 @@ config BT_GAP_AUTO_UPDATE_CONN_PARAMS
     default n
 
 endif # !ZMK_SPLIT_ROLE_CENTRAL
+
+if ZMK_INPUT_SPLIT
+
+config ZMK_INPUT_SPLIT_MSG_QUEUE_SIZE
+    int "Max number of input split messages to queue for sending over BLE"
+    default 32
+    help
+      Sets the maximum number of input split events that can be queued for BLE notifications.
+      Increasing this reduces drops during high-rate input bursts at the cost of additional RAM.
+
+endif # ZMK_INPUT_SPLIT
 
 endmenu
 

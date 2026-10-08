@@ -1,0 +1,11 @@
+file_format: "1"
+id: custom_settings_usb_wired_split
+name: Custom Settings USB+Wired Split
+type: shield
+requires: [seeed_xiao]
+features:
+  - keys
+  - studio
+siblings:
+  - custom_settings_usb_wired_split_left
+  - custom_settings_usb_wired_split_right

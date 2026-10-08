@@ -16,4 +16,13 @@
 #define LPM009M360A_CMD_VCOM 0x40
 #define LPM009M360A_CMD_UPDATE 0x80
 
+/*
+ * Data mode select bits (M3..M5) of the data update command. The value is
+ * shifted into bits 2..4 of the update command, so it can be used directly as
+ * the "color_mode" devicetree property.
+ */
+#define LPM009M360A_DATA_MODE_3BIT 0x00 /* 8 colors, R/G/B bit per dot */
+#define LPM009M360A_DATA_MODE_1BIT 0x02 /* monochrome, one bit per dot */
+#define LPM009M360A_DATA_MODE_4BIT 0x04 /* 8 colors, R/G/B + dummy bit per dot */
+
 #endif /* LPM009M360A_DISPLAY_DRIVER_H__ */

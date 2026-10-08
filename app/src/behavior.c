@@ -24,6 +24,7 @@
 #include <drivers/behavior.h>
 #include <zmk/behavior.h>
 #include <zmk/hid.h>
+#include <zmk/screen_transfer.h>
 #include <zmk/matrix.h>
 
 #include <zmk/events/position_state_changed.h>
@@ -41,13 +42,13 @@ const struct device *z_impl_behavior_get_binding(const char *name) {
     }
 
     STRUCT_SECTION_FOREACH(zmk_behavior_ref, item) {
-        if (z_device_is_ready(item->device) && item->device->name == name) {
+        if (device_is_ready(item->device) && item->device->name == name) {
             return item->device;
         }
     }
 
     STRUCT_SECTION_FOREACH(zmk_behavior_ref, item) {
-        if (z_device_is_ready(item->device) && strcmp(item->device->name, name) == 0) {
+        if (device_is_ready(item->device) && strcmp(item->device->name, name) == 0) {
             return item->device;
         }
     }
@@ -66,6 +67,8 @@ static int invoke_locally(struct zmk_behavior_binding *binding,
 
 int zmk_behavior_invoke_binding(const struct zmk_behavior_binding *src_binding,
                                 struct zmk_behavior_binding_event event, bool pressed) {
+    /* Releases still clean up keys/layers held before transmission began. */
+    if (pressed && zitaotech_screen_transfer_active()) return 0;
     // We want to make a copy of this, since it may be converted from
     // relative to absolute before being invoked
     struct zmk_behavior_binding binding = *src_binding;
@@ -130,8 +133,21 @@ static int validate_hid_usage(uint16_t usage_page, uint16_t usage_id) {
     LOG_DBG("Validate usage %d in page %d", usage_id, usage_page);
     switch (usage_page) {
     case HID_USAGE_KEY:
-        if (usage_id == 0 || (usage_id > ZMK_HID_KEYBOARD_NKRO_MAX_USAGE &&
-                              usage_id < LEFT_CONTROL && usage_id > RIGHT_GUI)) {
+        /*
+         * The keyboard page is not just the basic usages plus the modifiers:
+         * ZMK's own key definitions continue past Right GUI with the extended
+         * block K_PLAY_PAUSE (0xE8) ... K_CALCULATOR (0xFB), and the ZitaoTech
+         * keymaps ship with K_BACK (0xF1) on the Back key of every board.
+         *
+         * Stopping at Right GUI made those keycodes impossible to assign from
+         * ZMK Studio: the editor got back "invalid parameters" for a keycode
+         * the firmware itself defines, which reads as a broken keymap rather
+         * than a rejected value.  Accept the whole 8-bit usage space, keeping
+         * only usage 0 and the unused 0x00A5..0x00DF block out.
+         */
+        if (usage_id == 0 ||
+            (usage_id > ZMK_HID_KEYBOARD_NKRO_MAX_USAGE &&
+             usage_id < HID_USAGE_KEY_KEYBOARD_LEFTCONTROL)) {
             return -EINVAL;
         }
         break;
@@ -267,7 +283,7 @@ zmk_behavior_local_id_t zmk_behavior_get_local_id(const char *name) {
     }
 
     STRUCT_SECTION_FOREACH(zmk_behavior_local_id_map, item) {
-        if (z_device_is_ready(item->device) && strcmp(item->device->name, name) == 0) {
+        if (device_is_ready(item->device) && strcmp(item->device->name, name) == 0) {
             return item->local_id;
         }
     }
@@ -277,7 +293,7 @@ zmk_behavior_local_id_t zmk_behavior_get_local_id(const char *name) {
 
 const char *zmk_behavior_find_behavior_name_from_local_id(zmk_behavior_local_id_t local_id) {
     STRUCT_SECTION_FOREACH(zmk_behavior_local_id_map, item) {
-        if (z_device_is_ready(item->device) && item->local_id == local_id) {
+        if (device_is_ready(item->device) && item->local_id == local_id) {
             return item->device->name;
         }
     }

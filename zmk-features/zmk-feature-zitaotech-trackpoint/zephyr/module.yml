@@ -1,0 +1,4 @@
+name: zmk-feature-zitaotech-trackpoint
+build:
+  cmake: .
+  kconfig: Kconfig

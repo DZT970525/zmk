@@ -1,0 +1,91 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { setupZMKMocks } from "@cormoran/zmk-studio-react-hook/testing";
+import { call_rpc } from "@zmkfirmware/zmk-studio-ts-client";
+import App from "../src/App";
+import { Response } from "../src/proto/cormoran/zmk/custom_settings/custom_settings";
+
+// Mock the ZMK client
+jest.mock("@zmkfirmware/zmk-studio-ts-client", () => ({
+  create_rpc_connection: jest.fn(),
+  call_rpc: jest.fn(),
+}));
+
+jest.mock("@zmkfirmware/zmk-studio-ts-client/transport/serial", () => ({
+  connect: jest.fn(),
+}));
+
+describe("App Component", () => {
+  describe("Basic Rendering", () => {
+    it("should render the application header", () => {
+      render(<App />);
+
+      expect(screen.getByText(/ZMK Custom Settings/i)).toBeInTheDocument();
+      expect(screen.getByText(/Device settings console/i)).toBeInTheDocument();
+    });
+
+    it("should render connection button when disconnected", () => {
+      render(<App />);
+
+      expect(screen.getByText(/Connect Serial/i)).toBeInTheDocument();
+    });
+
+    it("should render footer", () => {
+      render(<App />);
+
+      expect(screen.getByText(/Settings module/i)).toBeInTheDocument();
+    });
+  });
+
+  describe("Connection Flow", () => {
+    let mocks: ReturnType<typeof setupZMKMocks>;
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      mocks = setupZMKMocks();
+      (call_rpc as jest.Mock).mockResolvedValue(emptyStatusResponse());
+    });
+
+    it("should connect to device when connect button is clicked", async () => {
+      mocks.mockSuccessfulConnection({
+        deviceName: "Test Keyboard",
+        subsystems: ["cormoran_custom_settings"],
+      });
+
+      const { connect: serial_connect } =
+        await import("@zmkfirmware/zmk-studio-ts-client/transport/serial");
+      (serial_connect as jest.Mock).mockResolvedValue(mocks.mockTransport);
+
+      render(<App />);
+
+      expect(screen.getByText(/Connect Serial/i)).toBeInTheDocument();
+
+      const user = userEvent.setup();
+      const connectButton = screen.getByText(/Connect Serial/i);
+      await user.click(connectButton);
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/Connected to: Test Keyboard/i)
+        ).toBeInTheDocument();
+      });
+
+      expect(screen.getByText(/Disconnect/i)).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "Settings" })
+      ).toBeInTheDocument();
+    });
+  });
+});
+
+function emptyStatusResponse() {
+  return {
+    custom: {
+      call: {
+        payload: Response.encode(
+          Response.create({ status: { affectedCount: 0, message: "OK" } })
+        ).finish(),
+      },
+    },
+  };
+}

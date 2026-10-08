@@ -1,0 +1,4 @@
+name: zmk-feature-zitaotech-trackpad
+build:
+  cmake: .
+  kconfig: Kconfig

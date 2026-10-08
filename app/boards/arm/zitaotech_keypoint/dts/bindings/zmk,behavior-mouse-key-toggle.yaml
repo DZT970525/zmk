@@ -1,5 +1,0 @@
-description: Mouse key press/release toggle behavior
-
-compatible: "zmk,behavior-mouse-key-toggle"
-
-include: one_param.yaml

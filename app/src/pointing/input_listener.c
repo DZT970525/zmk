@@ -1,3 +1,4 @@
+#include <zmk/screen_transfer.h>
 /*
  * Copyright (c) 2024 The ZMK Contributors
  *
@@ -72,6 +73,7 @@ struct input_listener_processor_data {
 
 struct input_listener_config {
     uint8_t listener_index;
+    bool native_highres_scroll;
     struct input_listener_config_entry base;
     size_t layer_overrides_len;
     struct input_listener_layer_override layer_overrides[];
@@ -128,6 +130,14 @@ static void handle_key_code(const struct input_listener_config *config,
     int8_t btn;
 
     switch (evt->code) {
+    case INPUT_BTN_TOUCH:
+        btn = 0;
+        if (evt->value > 0) {
+            WRITE_BIT(data->mouse.button_set, btn, 1);
+        } else {
+            WRITE_BIT(data->mouse.button_clear, btn, 1);
+        }
+        break;
     case INPUT_BTN_0:
     case INPUT_BTN_1:
     case INPUT_BTN_2:
@@ -239,7 +249,7 @@ static void clear_xy_data(struct input_listener_xy_data *data) {
 }
 
 #if IS_ENABLED(CONFIG_ZMK_POINTING_SMOOTH_SCROLLING)
-static void apply_resolution_scaling(struct input_listener_data *data, struct input_event *evt) {
+static void apply_resolution_scaling(const struct input_listener_config *config, struct input_listener_data *data, struct input_event *evt) {
     int16_t *remainder;
     uint8_t div;
 
@@ -256,6 +266,14 @@ static void apply_resolution_scaling(struct input_listener_data *data, struct in
         return;
     }
 
+    if (config->native_highres_scroll) {
+        // Logical multiplier 0..15 represents physical resolution 1..16.
+        int multiplier = 17 - div;
+        int32_t value = (int32_t)evt->value * multiplier + *remainder;
+        evt->value = value / 16;
+        *remainder = value - (int32_t)evt->value * 16;
+        return;
+    }
     int16_t val = evt->value + *remainder;
     int16_t scaled = val / (int16_t)div;
     *remainder = val - (scaled * (int16_t)div);
@@ -265,6 +283,12 @@ static void apply_resolution_scaling(struct input_listener_data *data, struct in
 
 static void input_handler(const struct input_listener_config *config,
                           struct input_listener_data *data, struct input_event *evt) {
+    if (zitaotech_screen_transfer_active()) {
+        clear_xy_data(&data->mouse.data);
+        clear_xy_data(&data->mouse.wheel_data);
+        data->mouse.button_set = data->mouse.button_clear = 0;
+        return;
+    }
     // First, process to update the event data as needed.
     int ret = filter_with_input_config(config, data, evt);
 
@@ -276,7 +300,7 @@ static void input_handler(const struct input_listener_config *config,
     }
 
 #if IS_ENABLED(CONFIG_ZMK_POINTING_SMOOTH_SCROLLING)
-    apply_resolution_scaling(data, evt);
+    apply_resolution_scaling(config, data, evt);
 #endif // IS_ENABLED(CONFIG_ZMK_POINTING_SMOOTH_SCROLLING)
 
     switch (evt->type) {
@@ -317,7 +341,7 @@ static void input_handler(const struct input_listener_config *config,
             }
         }
 
-        zmk_endpoints_send_mouse_report();
+        zmk_endpoint_send_mouse_report();
         zmk_hid_mouse_scroll_set(0, 0);
         zmk_hid_mouse_movement_set(0, 0);
 
@@ -373,6 +397,18 @@ static void input_handler(const struct input_listener_config *config,
 
 #define IL_OVERRIDE_DATA(node, parent) IL_EXTRACT_DATA(node, parent, node)
 
+#if DT_NODE_EXISTS(DT_NODELABEL(bbtrackpad))
+#define IL_NATIVE_HIGHRES(n) DT_SAME_NODE(DT_INST_PHANDLE(n, device), DT_NODELABEL(bbtrackpad))
+#else
+#define IL_NATIVE_HIGHRES(n) 0
+#endif
+
+#if DT_NODE_EXISTS(DT_NODELABEL(trackpoint_split))
+#define IL_TRACKPOINT_HIGHRES(n) DT_SAME_NODE(DT_INST_PHANDLE(n, device), DT_NODELABEL(trackpoint_split))
+#else
+#define IL_TRACKPOINT_HIGHRES(n) 0
+#endif
+
 #define IL_INST(n)                                                                                 \
     COND_CODE_1(                                                                                   \
         DT_NODE_HAS_STATUS(DT_INST_PHANDLE(n, device), okay),                                      \
@@ -380,6 +416,7 @@ static void input_handler(const struct input_listener_config *config,
          DT_INST_FOREACH_CHILD_VARGS(n, CHILD_CONFIG,                                              \
                                      n) static const struct input_listener_config config_##n =     \
              {                                                                                     \
+                 .native_highres_scroll = IL_NATIVE_HIGHRES(n) || IL_TRACKPOINT_HIGHRES(n),                            \
                  .listener_index = n,                                                              \
                  .base = IL_EXTRACT_CONFIG(DT_DRV_INST(n), n, base),                               \
                  .layer_overrides_len = (0 DT_INST_FOREACH_CHILD(n, IL_ONE)),                      \
@@ -391,9 +428,12 @@ static void input_handler(const struct input_listener_config *config,
                  .layer_override_data = {DT_INST_FOREACH_CHILD_SEP_VARGS(n, IL_OVERRIDE_DATA,      \
                                                                          (, ), n)},                \
              };                                                                                    \
-         void input_handler_##n(struct input_event *evt) {                                         \
+         void input_handler_##n(struct input_event *evt, void *user_data) {                        \
              input_handler(&config_##n, &data_##n, evt);                                           \
-         } INPUT_CALLBACK_DEFINE(DEVICE_DT_GET(DT_INST_PHANDLE(n, device)), input_handler_##n);),  \
+         } INPUT_CALLBACK_DEFINE(DEVICE_DT_GET(DT_INST_PHANDLE(n, device)), input_handler_##n,     \
+                                 NULL);),                                                          \
         ())
 
 DT_INST_FOREACH_STATUS_OKAY(IL_INST)
+
+

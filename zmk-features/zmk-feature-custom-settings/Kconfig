@@ -1,0 +1,250 @@
+config ZMK_CUSTOM_SETTINGS
+    bool "Enable custom settings"
+    select SETTINGS
+    select ZMK_LOW_PRIORITY_WORK_QUEUE
+
+if ZMK_CUSTOM_SETTINGS
+
+# settings_load() runs on the main thread at boot, and this module's load
+# path (pool-backed large values, keyspace slot binding + blob decode) needs
+# more headroom than Zephyr's bare 1024-byte MAIN_STACK_SIZE default.
+# Found on real hardware: with a persisted keyspace entry present, boot
+# overflowed the 1024-byte main stack (usage fault in arch_system_halt with
+# a corrupted return address) before USB even enumerated, while the same
+# image booted fine with 2048. configdefault only raises the default; an
+# explicit board/user setting still wins.
+configdefault MAIN_STACK_SIZE
+    default 2048
+
+config ZMK_CUSTOM_SETTINGS_VALUE_MAX_SIZE
+    int "Maximum single-frame custom setting value size"
+    default 64
+    range 1 64 if ZMK_CUSTOM_SETTINGS_PROTOBUF
+    help
+      Size of the struct zmk_custom_setting_value API exchange carrier
+      (stack-allocated by zmk_custom_setting_read/write callers and used by
+      the array feature's element storage) and the single-frame RPC value
+      bound: the largest value an incoming single-frame write can carry.
+      Since simplification P4 this does NOT size any per-setting storage -
+      a BYTES/STRING setting's value lives in an exact-size buffer or pool
+      region, and scalars store inline in a small per-setting state block.
+      It is pinned to 64 while the protobuf schema is enabled. Settings
+      that need to store a larger value register with an explicit larger
+      max_size via ZMK_CUSTOM_SETTING_DEFINE_SIZED/_POOLED; a larger value
+      is written over the chunked WriteValueChunk RPC and read via the
+      ordinary (streamed) GetSetting.
+
+config ZMK_CUSTOM_SETTINGS_LARGE_VALUES
+    bool "Enable large (>single-frame) setting values and the shared value pool"
+    default y
+    help
+      Compiles in per-setting large values and the shared large-value pool
+      (ZMK_CUSTOM_SETTING_DEFINE_SIZED / _POOLED / LARGE_POOL_DEFINE, the
+      chunked write RPC, and the >carrier read/write firmware API). Disable to
+      shrink firmware when every setting fits
+      CONFIG_ZMK_CUSTOM_SETTINGS_VALUE_MAX_SIZE. Keyspaces require this.
+
+config ZMK_CUSTOM_SETTINGS_LARGE_VALUE_MAX_SIZE
+    int "Maximum per-setting large value size"
+    default ZMK_CUSTOM_SETTINGS_VALUE_MAX_SIZE
+    help
+      Absolute ceiling for a single setting's per-setting max_size
+      (ZMK_CUSTOM_SETTING_DEFINE_SIZED) and the size of the staging buffers
+      used to assemble a large value from chunked RPC and to encode/decode a
+      record. Raising this does NOT inflate every setting: only a setting
+      registered with a larger max_size, plus the shared chunk/record staging
+      buffers, grow. Values above ZMK_CUSTOM_SETTINGS_VALUE_MAX_SIZE are only
+      reachable through the chunked ReadValueChunk/WriteValueChunk RPC and the
+      zmk_custom_setting_read_into / zmk_custom_setting_write_bytes firmware
+      API; the single-frame Read/Write RPC omits/rejects them.
+
+config ZMK_CUSTOM_SETTINGS_CUSTOM_SUBSYSTEM_ID_MAX_LEN
+    int "Maximum custom subsystem id length"
+    default 32
+
+config ZMK_CUSTOM_SETTINGS_KEY_MAX_LEN
+    int "Maximum custom setting key length"
+    default 48
+    range 1 48 if ZMK_CUSTOM_SETTINGS_PROTOBUF
+    help
+      The Studio RPC protobuf schema currently supports keys up to 48 bytes.
+
+config ZMK_CUSTOM_SETTINGS_PROTOBUF
+    bool
+    select NANOPB
+    imply NANOPB_NO_ERRMSG
+    imply NANOPB_WITHOUT_64BIT
+    imply NANOPB_NO_ENCODE_SIZE_CHECK
+
+config ZMK_CUSTOM_SETTINGS_STUDIO_RPC
+    bool "Enable custom settings Studio RPC"
+    depends on ZMK_STUDIO
+    select ZMK_CUSTOM_SETTINGS_PROTOBUF
+
+config ZMK_CUSTOM_SETTINGS_SPLIT_RPC_RELAY
+    bool "Relay custom settings RPC across split halves"
+    depends on ZMK_SPLIT_RELAY_EVENT
+    select ZMK_CUSTOM_SETTINGS_PROTOBUF
+    help
+      Relays custom settings RPC requests to split peripherals and encoded
+      setting notifications back to the central side. Increase
+      CONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN if your request or notification
+      payloads exceed the default split relay event payload size.
+
+config ZMK_CUSTOM_SETTINGS_RELAY_REQUEST_QUEUE_SIZE
+    int "Maximum queued custom settings relay requests"
+    default 4
+    range 1 16
+    depends on ZMK_CUSTOM_SETTINGS_SPLIT_RPC_RELAY
+    help
+      Maximum number of relayed custom settings requests that can wait for
+      low-priority workqueue processing.
+
+config ZMK_CUSTOM_SETTINGS_RELAY_NOTIFICATION_QUEUE_SIZE
+    int "Maximum queued custom settings relay notifications"
+    default 4
+    range 1 16
+    depends on ZMK_CUSTOM_SETTINGS_SPLIT_RPC_RELAY
+    help
+      Maximum number of relayed custom settings notifications that can wait for
+      low-priority workqueue processing.
+
+config ZMK_CUSTOM_SETTINGS_NOTIFICATION_QUEUE_SIZE
+    int "Maximum queued custom settings notifications"
+    default 8
+    range 1 32
+    help
+      Maximum number of setting change notifications that can wait for
+      low-priority workqueue processing.
+
+config ZMK_CUSTOM_SETTINGS_LIST_NOTIFICATION_BATCH_SIZE
+    int "List item notifications sent per low-priority work cycle"
+    default 4
+    range 1 32
+    help
+      Number of list-item notifications raised back-to-back before the
+      list work item waits CONFIG_ZMK_CUSTOM_SETTINGS_LIST_NOTIFICATION_DELAY_MS
+      for the next batch. Each item is still one notification frame;
+      raising this only reduces how many delayed work reschedules a full
+      listing takes. Higher values list large registries faster at the
+      cost of bursting more notifications through the transport at once.
+
+config ZMK_CUSTOM_SETTINGS_LIST_NOTIFICATION_DELAY_MS
+    int "Delay between custom settings list notification batches (ms)"
+    default 10
+    range 1 1000
+    help
+      Delay between batches of list-item notifications. See
+      CONFIG_ZMK_CUSTOM_SETTINGS_LIST_NOTIFICATION_BATCH_SIZE.
+
+config ZMK_CUSTOM_SETTINGS_CHUNKED_RPC
+    bool "Enable chunked write RPC for large setting values"
+    depends on ZMK_CUSTOM_SETTINGS_STUDIO_RPC
+    depends on ZMK_CUSTOM_SETTINGS_LARGE_VALUES
+    default y
+    help
+      Adds the WriteValueChunk RPC request that transfers a bytes/string
+      setting value across multiple write frames. Useful when a value plus
+      request/response overhead does not fit
+      CONFIG_ZMK_STUDIO_RPC_RX_BUF_SIZE (the RX path buffers a whole frame
+      before nanopb decodes it, so a large incoming value genuinely cannot
+      arrive in one frame). Reading a large value does not need this: since
+      simplification P2, GetSetting/ListSettings stream a value of any size
+      directly (the RPC transport's TX path streams its response
+      incrementally, unlike RX), so there is no ReadValueChunk any more.
+
+config ZMK_CUSTOM_SETTINGS_CHUNK_STAGING_SIZE
+    int "Chunked write staging buffer size"
+    default ZMK_CUSTOM_SETTINGS_LARGE_VALUE_MAX_SIZE
+    range 1 ZMK_CUSTOM_SETTINGS_LARGE_VALUE_MAX_SIZE
+    depends on ZMK_CUSTOM_SETTINGS_CHUNKED_RPC
+    help
+      Size of the single global buffer used to assemble a chunked write
+      before it is validated and applied on commit. One write transfer
+      session is supported at a time. The assembled value still has to fit
+      the target setting's own max_size, so a value larger than
+      CONFIG_ZMK_CUSTOM_SETTINGS_VALUE_MAX_SIZE requires that setting to
+      have been registered with a matching larger max_size (see
+      ZMK_CUSTOM_SETTING_DEFINE_SIZED and
+      CONFIG_ZMK_CUSTOM_SETTINGS_LARGE_VALUE_MAX_SIZE).
+
+config ZMK_CUSTOM_SETTINGS_TEMP_SLOTS
+    int "Temporary override pool slot count"
+    default 2
+    range 1 8
+    help
+      Number of settings that may have an active
+      ZMK_CUSTOM_SETTING_WRITE_MODE_TEMPORARY override at once, shared
+      across all registered settings instead of one slot embedded in
+      every setting. Writing a new temporary override once all slots are
+      in use fails with -EBUSY.
+
+config ZMK_CUSTOM_SETTINGS_TEMP_SLOT_SIZE
+    int "Temporary override pool slot size"
+    default 32
+    range 1 ZMK_CUSTOM_SETTINGS_VALUE_MAX_SIZE
+    help
+      Maximum value size that can use ZMK_CUSTOM_SETTING_WRITE_MODE_TEMPORARY.
+      Writing a larger value in temporary mode fails with -EMSGSIZE; other
+      write modes are unaffected.
+
+config ZMK_CUSTOM_SETTINGS_ARRAY
+    bool "Enable array settings"
+    default y
+    help
+      Compiles in fixed-length array settings (ZMK_CUSTOM_SETTING_ARRAY_DEFINE,
+      push/pop/insert/remove, the array index-view pool, and array RPC).
+      Disable to shrink firmware when no setting is an array.
+
+config ZMK_CUSTOM_SETTINGS_ARRAY_VIEW_POOL_SIZE
+    int "Array element index view pool size"
+    default 16
+    range 1 64
+    depends on ZMK_CUSTOM_SETTINGS_ARRAY
+    help
+      Number of struct zmk_custom_setting "index view" instances shared
+      across all array settings. zmk_custom_setting_find_array_element
+      hands out a view keyed by (array descriptor, index) from this pool
+      instead of registering one struct per element (see
+      ZMK_CUSTOM_SETTING_ARRAY_DEFINE). Views are cached and reused for the
+      same (array, index) pair, so this only needs to cover how many
+      distinct array elements are referenced at once (RPC handling, list
+      enumeration, tests); it does not bound array length.
+
+config ZMK_CUSTOM_SETTINGS_KEYSPACE
+    bool "Enable RPC-creatable keyspaces (namespaces)"
+    default y
+    select ZMK_CUSTOM_SETTINGS_LARGE_VALUES
+    help
+      Compiles in runtime-creatable keyspaces (ZMK_CUSTOM_SETTING_KEYSPACE_DEFINE,
+      the CreateSetting/DeleteSetting Studio RPC, and per-keyspace slot pools).
+      A keyspace slot is a pool-backed blob, so this requires
+      ZMK_CUSTOM_SETTINGS_LARGE_VALUES. Disable to shrink firmware when no
+      module registers a keyspace.
+
+config ZMK_CUSTOM_SETTINGS_RPC_CONVERTERS
+    bool "Enable per-setting RPC bytes converter hooks"
+    default y
+    help
+      Compiles in the ZMK_CUSTOM_SETTING_DEFINE_WITH_RPC_CONVERTERS
+      serialize/deserialize hooks that transform a BYTES value between its
+      stored form and its RPC form. Disable to shrink firmware when no setting
+      uses a converter (values pass through unchanged).
+
+config ZMK_CUSTOM_SETTINGS_RECORD
+    bool "Enable record/struct settings (TLV codec)"
+    default y
+    help
+      Compiles in ZMK_CUSTOM_SETTING_RECORD_* struct settings (a versioned
+      TLV codec over a BYTES setting). Disable to shrink firmware when no
+      setting is a record. A record larger than
+      CONFIG_ZMK_CUSTOM_SETTINGS_VALUE_MAX_SIZE additionally needs
+      ZMK_CUSTOM_SETTINGS_LARGE_VALUES.
+
+config ZMK_CUSTOM_SETTINGS_TEST
+    bool "Enable custom settings self-test"
+
+config ZMK_CUSTOM_SETTINGS_ZMK_CONFIG_SAMPLES
+    bool "Enable custom settings samples for tests/zmk-config"
+
+endif

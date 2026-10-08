@@ -1,0 +1,4 @@
+name: zmk-feature-matrix-tester
+build:
+  cmake: .
+  kconfig: Kconfig

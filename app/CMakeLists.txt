@@ -3,7 +3,28 @@ cmake_minimum_required(VERSION 3.13.1)
 set(CONFIG_APPLICATION_DEFINED_SYSCALL true)
 
 set(ZEPHYR_BOARD_ALIASES "boards/aliases.cmake")
-set(ZEPHYR_EXTRA_MODULES "${ZMK_EXTRA_MODULES};${CMAKE_CURRENT_SOURCE_DIR}/module;${CMAKE_CURRENT_SOURCE_DIR}/keymap-module")
+# ZitaoTech: the trackpad / backlight feature modules are vendored in-tree
+# under zmk-features/ so the board and shield drivers that use their headers
+# (pointing_dpi.h, zitaotech/zmk/trackpad.h, ...) build without a west project.
+get_filename_component(ZITAOTECH_FEATURES_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../zmk-features ABSOLUTE)
+set(ZITAOTECH_FEATURE_MODULES
+    ${ZITAOTECH_FEATURES_DIR}/zmk-feature-zitaotech-trackpad
+    ${ZITAOTECH_FEATURES_DIR}/zmk-feature-zitaotech-trackpoint
+    ${ZITAOTECH_FEATURES_DIR}/zmk-feature-zitaotech-bootmagic
+    ${ZITAOTECH_FEATURES_DIR}/zmk-feature-zitaotech-backlight
+    ${ZITAOTECH_FEATURES_DIR}/zmk-behavior-runtime-sensor-rotate
+    ${ZITAOTECH_FEATURES_DIR}/zmk-feature-custom-settings
+    ${ZITAOTECH_FEATURES_DIR}/zmk-feature-runtime-macro
+    ${ZITAOTECH_FEATURES_DIR}/zmk-feature-runtime-combo
+    ${ZITAOTECH_FEATURES_DIR}/zmk-feature-default-layer
+    ${ZITAOTECH_FEATURES_DIR}/zmk-module-ble-management
+    ${ZITAOTECH_FEATURES_DIR}/zmk-feature-os-detection
+    ${ZITAOTECH_FEATURES_DIR}/zmk-module-settings-rpc
+    ${ZITAOTECH_FEATURES_DIR}/zmk-feature-matrix-tester
+    ${ZITAOTECH_FEATURES_DIR}/zmk-feature-device-info
+)
+
+set(ZEPHYR_EXTRA_MODULES "${ZMK_EXTRA_MODULES};${CMAKE_CURRENT_SOURCE_DIR}/module;${CMAKE_CURRENT_SOURCE_DIR}/keymap-module;${ZITAOTECH_FEATURE_MODULES}")
 
 # Find Zephyr. This also loads Zephyr's build system.
 find_package(Zephyr REQUIRED HINTS ../zephyr)
@@ -23,6 +44,7 @@ zephyr_syscall_header(${APPLICATION_SOURCE_DIR}/include/drivers/ext_power.h)
 # Add your source file to the "app" target. This must come after
 # find_package(Zephyr) which defines the target.
 target_include_directories(app PRIVATE include)
+add_subdirectory(src/boot)
 target_sources(app PRIVATE src/stdlib.c)
 target_sources(app PRIVATE src/activity.c)
 target_sources(app PRIVATE src/behavior.c)
@@ -77,16 +99,8 @@ if ((NOT CONFIG_ZMK_SPLIT) OR CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
   target_sources(app PRIVATE src/events/layer_state_changed.c)
   target_sources(app PRIVATE src/events/modifiers_state_changed.c)
   target_sources(app PRIVATE src/events/keycode_state_changed.c)
-
-  # target_sources_ifdef(CONFIG_ZMK_INDICATOR_LED app PRIVATE src/indicator_led.c)
-  # target_sources_ifdef(CONFIG_ZMK_INDICATOR app PRIVATE src/indicator.c)
-  # target_sources_ifdef(CONFIG_ZMK_INDICATOR_CAPSLOCK app PRIVATE src/indicator_capslock.c)
-  # target_sources_ifdef(CONFIG_ZMK_INDICATOR_TP app PRIVATE src/indicator_tp.c)
-  target_sources_ifdef(CONFIG_ZMK_KEYBOARD_SLIDEBACKLIGHT app PRIVATE src/keyboard_slidebacklight.c)
-  # target_sources_ifdef(CONFIG_ZMK_KEYBOARD_MIDDLEBACKLIGHT app PRIVATE src/keyboard_middlebacklight.c)
-  target_sources_ifdef(CONFIG_ZMK_A320_INPUT_HANDLER app PRIVATE src/a320_input_handler.c)
-  target_sources_ifdef(CONFIG_ZMK_BBTRACKBALL_INPUT_HANDLER app PRIVATE src/bbtrackball_input_handler.c)
   target_sources_ifdef(CONFIG_ZMK_HID_INDICATORS app PRIVATE src/hid_indicators.c)
+
   if (CONFIG_ZMK_BLE)
     target_sources(app PRIVATE src/events/ble_active_profile_changed.c)
     target_sources(app PRIVATE src/behaviors/behavior_bt.c)
@@ -102,8 +116,10 @@ target_sources_ifdef(CONFIG_ZMK_BATTERY_REPORTING app PRIVATE src/events/battery
 target_sources_ifdef(CONFIG_ZMK_BATTERY_REPORTING app PRIVATE src/battery.c)
 
 target_sources_ifdef(CONFIG_ZMK_HID_INDICATORS app PRIVATE src/events/hid_indicators_changed.c)
+add_subdirectory_ifdef(CONFIG_ZMK_HID_INDICATORS src/indicators)
 
 target_sources_ifdef(CONFIG_ZMK_SPLIT app PRIVATE src/events/split_peripheral_status_changed.c)
+target_sources_ifdef(CONFIG_ZMK_SPLIT_ROLE_CENTRAL app PRIVATE src/events/split_central_status_changed.c)
 add_subdirectory_ifdef(CONFIG_ZMK_SPLIT src/split)
 
 target_sources_ifdef(CONFIG_USB_DEVICE_STACK app PRIVATE src/usb.c)
@@ -124,13 +140,28 @@ if (CONFIG_ZMK_STUDIO_RPC)
 
     # Turn off the default nanopb behavior
   set(NANOPB_GENERATE_CPP_STANDALONE OFF)
+  # ZitaoTech: the studio messages are vendored under app/proto/zmk/ instead of
+  # being read from the zmk-studio-messages module, because the ZitaoTech
+  # custom subsystem (`zmk.custom`, used by the trackpad/backlight Studio tabs
+  # and by the other ZitaoTech modules) adds a subsystem to studio.proto that
+  # the upstream module does not have.  The vendored files are copies of the
+  # pinned module revision plus that addition, and they have to be kept in sync
+  # when the module is updated.
+  #
+  # The protos import each other with bare names (e.g. `import "meta.proto";`),
+  # so the directory that holds them has to be part of protoc's import path.
+  # Generating them relative to the app directory puts the output in
+  # <build>/proto/zmk/*.pb.{c,h}, which is where <proto/zmk/studio.pb.h> and
+  # friends are expected to live.
+  list(APPEND NANOPB_IMPORT_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/proto/zmk)
 
-  nanopb_generate_cpp(proto_srcs proto_hdrs RELPATH ${ZEPHYR_ZMK_STUDIO_MESSAGES_MODULE_DIR}
-                        ${ZEPHYR_ZMK_STUDIO_MESSAGES_MODULE_DIR}/proto/zmk/studio.proto
-                        ${ZEPHYR_ZMK_STUDIO_MESSAGES_MODULE_DIR}/proto/zmk/meta.proto
-                        ${ZEPHYR_ZMK_STUDIO_MESSAGES_MODULE_DIR}/proto/zmk/core.proto
-                        ${ZEPHYR_ZMK_STUDIO_MESSAGES_MODULE_DIR}/proto/zmk/behaviors.proto
-                        ${ZEPHYR_ZMK_STUDIO_MESSAGES_MODULE_DIR}/proto/zmk/keymap.proto
+  nanopb_generate_cpp(proto_srcs proto_hdrs RELPATH ${CMAKE_CURRENT_SOURCE_DIR}
+                        ${CMAKE_CURRENT_SOURCE_DIR}/proto/zmk/studio.proto
+                        ${CMAKE_CURRENT_SOURCE_DIR}/proto/zmk/meta.proto
+                        ${CMAKE_CURRENT_SOURCE_DIR}/proto/zmk/core.proto
+                        ${CMAKE_CURRENT_SOURCE_DIR}/proto/zmk/behaviors.proto
+                        ${CMAKE_CURRENT_SOURCE_DIR}/proto/zmk/keymap.proto
+                        ${CMAKE_CURRENT_SOURCE_DIR}/proto/zmk/custom.proto
   )
 
   target_include_directories(app PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
@@ -140,3 +171,4 @@ if (CONFIG_ZMK_STUDIO_RPC)
 endif()
 
 zephyr_cc_option(-Wfatal-errors)
+target_sources(app PRIVATE src/behaviors/behavior_force_layer.c)

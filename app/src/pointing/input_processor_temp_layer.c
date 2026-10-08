@@ -9,14 +9,36 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <drivers/input_processor.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
 #include <zephyr/logging/log.h>
 #include <zmk/keymap.h>
 #include <zmk/behavior.h>
 #include <zmk/events/position_state_changed.h>
 #include <zmk/events/keycode_state_changed.h>
 #include <zmk/events/layer_state_changed.h>
+#include <zmk/pointing/temp_layer.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
+
+/*
+ * Runtime policy hooks.  Boards that want to control such a layer outside of
+ * devicetree - ZitaoTech's automatic mouse layer, which Studio switches on and
+ * off and whose timeout the user tunes - override these.  `dev` is the input
+ * device the event came from, so one processor instance shared by several
+ * pointing devices can still answer differently for each of them.
+ */
+__weak bool zmk_input_processor_temp_layer_enabled(const struct device *dev, uint32_t layer) {
+    ARG_UNUSED(dev);
+    ARG_UNUSED(layer);
+    return true;
+}
+
+__weak uint32_t zmk_input_processor_temp_layer_timeout_ms(const struct device *dev, uint32_t layer,
+                                                          uint32_t timeout_ms) {
+    ARG_UNUSED(dev);
+    ARG_UNUSED(layer);
+    return timeout_ms;
+}
 
 /* Constants and Types */
 #define MAX_LAYERS ZMK_KEYMAP_LAYERS_LEN
@@ -72,10 +94,10 @@ static void update_layer_state(struct temp_layer_state *state, bool activate) {
 
     state->is_active = activate;
     if (activate) {
-        zmk_keymap_layer_activate(state->toggle_layer);
+        zmk_keymap_layer_activate(state->toggle_layer, false);
         LOG_DBG("Layer %d activated", state->toggle_layer);
     } else {
-        zmk_keymap_layer_deactivate(state->toggle_layer);
+        zmk_keymap_layer_deactivate(state->toggle_layer, false);
         LOG_DBG("Layer %d deactivated", state->toggle_layer);
     }
 }
@@ -187,7 +209,7 @@ static int handle_keycode_state_changed(const struct device *dev, const zmk_even
         return ret;
     }
 
-    LOG_DBG("Setting last_tapped_timestamp to: %d", ev->timestamp);
+    LOG_DBG("Setting last_tapped_timestamp to: %lld", ev->timestamp);
     data->state.last_tapped_timestamp = ev->timestamp;
 
     ret = k_mutex_unlock(&data->lock);
@@ -247,16 +269,32 @@ static int temp_layer_handle_event(const struct device *dev, struct input_event 
 
     data->state.toggle_layer = param1;
 
+    /*
+     * The source may be switched off (Studio) or not allowed to bring the
+     * layer up right now.  Nothing is queued in that case: the layer cannot
+     * stay up because of this event, and a pending timeout from another
+     * source still runs, so a layer held by the other device is not dropped.
+     */
+    if (!zmk_input_processor_temp_layer_enabled(event->dev, param1)) {
+        k_mutex_unlock(&data->lock);
+        return ZMK_INPUT_PROC_CONTINUE;
+    }
+
     if (!data->state.is_active &&
         !should_quick_tap(cfg, data->state.last_tapped_timestamp, k_uptime_get())) {
         struct layer_state_action action = {.layer = param1, .activate = true};
 
         int ret = k_msgq_put(&temp_layer_action_msgq, &action, K_MSEC(10));
-        k_work_submit(&layer_action_work);
+        if (ret < 0) {
+            LOG_ERR("Failed to enqueue action to enable layer %d (%d)", param1, ret);
+        } else {
+            k_work_submit(&layer_action_work);
+        }
     }
 
-    if (param2 > 0) {
-        k_work_reschedule(&layer_disable_works[param1], K_MSEC(param2));
+    uint32_t timeout_ms = zmk_input_processor_temp_layer_timeout_ms(event->dev, param1, param2);
+    if (timeout_ms > 0) {
+        k_work_reschedule(&layer_disable_works[param1], K_MSEC(timeout_ms));
     }
 
     k_mutex_unlock(&data->lock);

@@ -4,6 +4,14 @@
 config SHIELD_LPM_VIEW
     def_bool $(shields_list_contains,lpm_view)
 
+config ZITAOTECH_SCREEN_STUDIO_RPC
+    bool "Studio right-screen carousel configuration and USB image upload"
+    depends on SHIELD_LPM_VIEW && ZMK_DISPLAY && ZMK_STUDIO_RPC
+    default y
+    help
+      Disabling this removes the screen configuration RPC and USB image
+      upload worker, while retaining normal keyboard status-screen drawing.
+
 menuconfig LPM009M360A
 		bool "LPM009M360A display driver"
 		default n

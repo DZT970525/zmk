@@ -1,0 +1,21 @@
+/*
+* Copyright (c) 2026 The ZMK Contributors
+* SPDX-License-Identifier: MIT
+*
+* Default Runtime Sensor Rotate Behavior Definitions
+*
+*/
+
+#include <dt-bindings/zmk/behaviors.h>
+
+/ {
+	behaviors {
+        #if ZMK_BEHAVIOR_OMIT(RSR)
+		/omit-if-no-ref/
+		#endif
+		rsr_trans: rsr_trans {
+			compatible = "zmk,behavior-runtime-sensor-rotate";
+			#sensor-binding-cells = <0>;
+		};
+	};
+};

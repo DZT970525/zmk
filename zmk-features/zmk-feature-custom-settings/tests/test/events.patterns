@@ -1,0 +1,3 @@
+/zmk: Welcome to ZMK!/p
+s/.*PASS: custom_settings_/PASS: custom_settings_/p
+s/zmk: on_keymap_binding_//p

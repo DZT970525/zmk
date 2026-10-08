@@ -1,0 +1,8 @@
+# Copyright (c) 2026 ZitaoTech
+# SPDX-License-Identifier: MIT
+
+description: Runtime DPI scaler for TrackPoint events received by the SOFLE central half
+
+compatible: "zmk,input-processor-trackpoint-dpi"
+
+include: ip_zero_param.yaml

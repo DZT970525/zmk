@@ -1,0 +1,167 @@
+config ZITAOTECH_TRACKPOINT_CONTROL
+    bool "ZitaoTech TrackPoint control (runtime DPI / burst)"
+    select SETTINGS
+    help
+      Runtime-adjustable TrackPoint settings for ZitaoTech boards: pointer
+      speed (ten DPI steps) and burst mode. The value lives on both halves:
+      the central scales the motion it receives over the split link, and the
+      peripheral mirrors it to drive the TrackPoint LED. Values are persisted
+      with ZMK's settings subsystem and exposed to ZitaoTech Studio through a
+      custom Studio RPC subsystem on the central.
+
+if ZITAOTECH_TRACKPOINT_CONTROL
+
+config ZITAOTECH_TRACKPOINT_CONTROL_STUDIO_RPC
+    bool "Enable ZitaoTech TrackPoint custom Studio RPC"
+    depends on ZMK_STUDIO
+
+# Reported to the web UI; keeps the UI able to show which driver is in charge.
+config ZITAOTECH_TRACKPOINT_DRIVER_NAME
+    string "TrackPoint driver name reported to Studio"
+    default "TrackPoint"
+
+config ZITAOTECH_TRACKPOINT_DPI_MIN
+    int "Lowest DPI step value"
+    default 1
+
+config ZITAOTECH_TRACKPOINT_DPI_MAX
+    int "Highest DPI step value"
+    default 100
+
+config ZITAOTECH_TRACKPOINT_DPI_STEP
+    int "DPI value change per step"
+    default 1
+
+config ZITAOTECH_TRACKPOINT_DPI_DEFAULT
+    int "DPI value at first boot"
+    default 40
+
+config ZITAOTECH_TRACKPOINT_BURST_MAX
+    int "Highest burst-mode pointer speed multiplier"
+    default 10
+    range 2 10
+    help
+      Burst mode multiplies the pointer speed on top of the DPI step, for
+      quickly crossing a screen without leaving the comfortable DPI setting.
+
+config ZITAOTECH_TRACKPOINT_AXIS_MIN
+    int "Lowest per-direction fine tuning multiplier, in percent"
+    default 100
+    help
+      Each direction (X+, X-, Y+, Y-) can be scaled on its own because a
+      TrackPoint is rarely equally sensitive both ways. 100 leaves it alone.
+
+config ZITAOTECH_TRACKPOINT_AXIS_MAX
+    int "Highest per-direction fine tuning multiplier, in percent"
+    default 200
+    help
+      ZitaoTech Studio lets the user pick anything between the min and the max,
+      in 0.01 steps (this is the percent value it shows as x1.00 .. x2.00).
+
+config ZITAOTECH_TRACKPOINT_ACCEL_MIN
+    int "Lowest linear acceleration multiplier, in percent"
+    default 100
+    help
+      100 means "no acceleration". The UI shows it as x1.00.
+
+config ZITAOTECH_TRACKPOINT_ACCEL_MAX
+    int "Highest linear acceleration multiplier, in percent"
+    default 200
+
+config ZITAOTECH_TRACKPOINT_ACCEL_RAMP_MS
+    int "How long the same-direction movement takes to reach full acceleration (ms)"
+    default 400
+    help
+      The speed ramps up linearly from x1.00 to the configured multiplier over
+      this much continuous movement. Letting go or reversing resets the ramp.
+
+config ZITAOTECH_TRACKPOINT_ACCEL_IDLE_MS
+    int "Gap that restarts the acceleration ramp (ms)"
+    default 120
+    help
+      If no sample arrives for an axis within this time, the next one starts
+      from x1.00 again.
+
+config ZITAOTECH_TRACKPOINT_SCROLL_SPEED_MIN
+    int "Lowest scroll speed multiplier, in percent"
+    default 25
+
+config ZITAOTECH_TRACKPOINT_SCROLL_SPEED_MAX
+    int "Highest scroll speed multiplier, in percent"
+    default 300
+
+config ZITAOTECH_TRACKPOINT_SCROLL_SPEED_DEFAULT
+    int "Scroll speed multiplier at first boot, in percent"
+    default 100
+
+config ZITAOTECH_TRACKPOINT_SCROLL_BURST_MAX
+    int "Highest scroll burst multiplier"
+    default 10
+    range 2 10
+    help
+      Scroll burst multiplies the scroll speed, for flicking through long
+      documents without changing the normal scroll speed.
+
+config ZITAOTECH_TRACKPOINT_SCROLL_ACCEL_MIN
+    int "Lowest scroll acceleration multiplier, in percent"
+    default 100
+    help
+      100 means "no acceleration". The UI shows it as x1.00.
+
+config ZITAOTECH_TRACKPOINT_SCROLL_ACCEL_MAX
+    int "Highest scroll acceleration multiplier, in percent"
+    default 500
+
+config ZITAOTECH_TRACKPOINT_SCROLL_ACCEL_RAMP_MS
+    int "How long continuous scrolling takes to reach full acceleration (ms)"
+    default 800
+    help
+      While the scroll key is held and the wheel keeps turning the same way, the
+      scroll speed ramps linearly from x1.00 to the configured multiplier over
+      this much time. Releasing the key or reversing resets the ramp.
+
+config ZITAOTECH_TRACKPOINT_SCROLL_ACCEL_IDLE_MS
+    int "Gap that restarts the scroll acceleration ramp (ms)"
+    default 300
+    help
+      Wheel steps arrive far apart compared with pointer samples, so this is
+      more forgiving than the pointer's own idle timeout: as long as steps keep
+      coming within this window, the ramp keeps building.
+
+config ZITAOTECH_TRACKPOINT_ARROW_SWIPE_THRESHOLD
+    int "Arrow mode swipe threshold (default)"
+    default 34
+    range 5 200
+    help
+      How far the TrackPoint has to travel before arrow mode emits an arrow key.
+      Lower is more sensitive, higher needs a firmer push.
+
+config ZITAOTECH_TRACKPOINT_ARROW_SWIPE_MIN
+    int "Lowest selectable swipe threshold"
+    default 20
+    help
+      A resting finger on a TrackPoint still produces a trickle of motion, so
+      the floor is high enough that a hand merely touching the stick does not
+      fire arrow keys on its own.
+
+config ZITAOTECH_TRACKPOINT_ARROW_SWIPE_MAX
+    int "Highest selectable swipe threshold"
+    default 400
+    help
+      The TrackPoint's raw samples are much larger than a trackpad's, so the
+      usable range has to run further: 400 needs a deliberate push where 120
+      was already reached after a couple of samples.
+
+config ZITAOTECH_TRACKPOINT_SAVE_DEBOUNCE_MS
+    int "Delay before pending TrackPoint settings are written to flash (ms)"
+    default 1000
+    help
+      Changes are kept in RAM and written once the value has been stable for
+      this long, so holding a DPI key does not mean one flash write per step.
+
+endif # ZITAOTECH_TRACKPOINT_CONTROL
+
+config ZITAOTECH_TRACKPOINT_SCROLL_KEY_POSITION
+    int "Default scroll mode key position"
+    default 61 if BOARD_ZITAOTECH_SOFLE_LEFT || BOARD_ZITAOTECH_SOFLE_RIGHT
+    default -1

@@ -1,0 +1,91 @@
+#include <dt-bindings/zmk/keys.h>
+#include <behaviors.dtsi>
+#include <dt-bindings/zmk/kscan_mock.h>
+
+/*
+ * Exercises the cormoran,runtime-combo-defaults read-path fallback added by
+ * CONFIG_ZMK_RUNTIME_COMBO_TEST (see runtime_combo_test_setup in
+ * src/runtime_combo/runtime_combo.c):
+ *
+ *   slot 0: positions {0,1}   -> key_press(B)  (regression, not a default)
+ *   slot 1: positions {2,3}   -> key_press(G)  (default, left untouched)
+ *   slot 2: positions {4,5}   -> key_press(H)  (default, tombstoned by delete)
+ *   slot 3: positions {6,7}   -> key_press(I)  (default, overridden to J)
+ *   slot 4: positions {8,9}   -> key_press(K)  (default, deleted then reset)
+ */
+
+/ {
+    runtime_combo_defaults {
+        compatible = "cormoran,runtime-combo-defaults";
+
+        combo_default_g {
+            slot = <1>;
+            key-positions = <2 3>;
+            bindings = <&kp G>;
+        };
+
+        combo_default_h {
+            slot = <2>;
+            key-positions = <4 5>;
+            bindings = <&kp H>;
+        };
+
+        combo_default_i {
+            slot = <3>;
+            key-positions = <6 7>;
+            bindings = <&kp I>;
+        };
+
+        combo_default_k {
+            slot = <4>;
+            key-positions = <8 9>;
+            bindings = <&kp K>;
+        };
+    };
+
+    keymap {
+        compatible = "zmk,keymap";
+
+        default_layer {
+            bindings = <
+            &kp L &kp M &kp N &kp O &kp P &kp Q &kp R &kp S &kp T &kp U
+            >;
+        };
+    };
+};
+
+&kscan {
+    rows = <1>;
+    columns = <10>;
+    events = <
+    /* slot 0 regression: positions 0,1 -> B */
+    ZMK_MOCK_PRESS(0,0,10)
+    ZMK_MOCK_PRESS(0,1,10)
+    ZMK_MOCK_RELEASE(0,0,10)
+    ZMK_MOCK_RELEASE(0,1,10)
+
+    /* slot 1 default fires unmodified: positions 2,3 -> G */
+    ZMK_MOCK_PRESS(0,2,10)
+    ZMK_MOCK_PRESS(0,3,10)
+    ZMK_MOCK_RELEASE(0,2,10)
+    ZMK_MOCK_RELEASE(0,3,10)
+
+    /* slot 2 default is tombstoned: positions 4,5 pass through as P/Q */
+    ZMK_MOCK_PRESS(0,4,10)
+    ZMK_MOCK_PRESS(0,5,10)
+    ZMK_MOCK_RELEASE(0,4,10)
+    ZMK_MOCK_RELEASE(0,5,10)
+
+    /* slot 3 default is overridden: positions 6,7 -> J, not the default I */
+    ZMK_MOCK_PRESS(0,6,10)
+    ZMK_MOCK_PRESS(0,7,10)
+    ZMK_MOCK_RELEASE(0,6,10)
+    ZMK_MOCK_RELEASE(0,7,10)
+
+    /* slot 4 default was tombstoned then reset: positions 8,9 -> K again */
+    ZMK_MOCK_PRESS(0,8,10)
+    ZMK_MOCK_PRESS(0,9,10)
+    ZMK_MOCK_RELEASE(0,8,10)
+    ZMK_MOCK_RELEASE(0,9,10)
+    >;
+};

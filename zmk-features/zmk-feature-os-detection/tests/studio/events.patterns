@@ -1,0 +1,3 @@
+s/.*custom_subsystem_init:.*Identifier: //p
+/os detection: get_state/p
+/os detection: set_ble_override/p

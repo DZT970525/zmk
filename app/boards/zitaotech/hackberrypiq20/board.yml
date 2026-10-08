@@ -1,0 +1,7 @@
+board:
+  name: hackberrypiq20
+  vendor: zitaotech
+  socs:
+    - name: rp2040
+      variants:
+        - name: zmk

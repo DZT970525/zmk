@@ -1,0 +1,6 @@
+config ZMK_MATRIX_TESTER
+    bool "Studio physical matrix tester"
+    depends on ZMK_STUDIO_RPC
+    depends on !ZMK_SPLIT || ZMK_SPLIT_ROLE_CENTRAL
+    help
+      Read-only physical key states and session test history through Studio.

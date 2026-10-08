@@ -1,0 +1,17 @@
+version: v2
+inputs:
+  - directory: ../proto
+plugins:
+  - local: protoc-gen-ts_proto
+    opt:
+      - outputServices=false
+      - outputJsonMethods=false
+      - outputClientImpl=false
+      - useExactTypes=false
+      - esModuleInterop=true
+      # Plain TS `enum` (ts-proto's default) emits runtime code, which this
+      # project's tsconfig `erasableSyntaxOnly` forbids - an `as const`
+      # object literal is erasable. (runtime_macro.proto declares no enums
+      # today, but keep this so adding one never breaks the build.)
+      - enumsAsLiterals=true
+    out: src/proto

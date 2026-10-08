@@ -1,0 +1,4 @@
+zmk: os detection: get_state usb_connected=0 usb_detected=1 ble_profiles_count=0 current_effective=1
+zmk: os detection: set_ble_override(profile=0, WINDOWS) rc=-22
+cormoran__os_detection, Security: Unsecured
+cormoran_custom_settings, Security: Unsecured

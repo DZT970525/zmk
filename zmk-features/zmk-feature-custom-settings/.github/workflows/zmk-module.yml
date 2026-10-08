@@ -1,0 +1,89 @@
+name: Test ZMK Module
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**/*.md"
+      - .github/workflows/copilot-setup-steps.yml
+      - .github/workflows/devcontainer.yml
+      - .github/workflows/claude.yml
+      - .github/workflows/codex.yml
+      - .github/workflows/web-ui.yml
+      - .github/actions/zmk-env/**
+      - .gitignore
+      - .claude/**
+      - "web/**"
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # 20:00 JST every Friday (11:00 UTC)
+    - cron: "0 11 * * 5"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: zmkfirmware/zmk-build-arm:stable
+    name: Build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - uses: ./.github/actions/west-init
+      - name: Test
+        run: python3 -m unittest -v
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zmk-firmware
+          path: |
+            build/*/zephyr/zmk.uf2
+
+  renode-relay-test:
+    runs-on: ubuntu-latest
+    # Two real images booted on one Renode session + the Renode install.
+    timeout-minutes: 20
+    container:
+      image: zmkfirmware/zmk-build-arm:stable
+    name: Renode custom-settings wired-split relay test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - uses: ./.github/actions/west-init
+      - name: Build usb+wired split halves
+        # The Studio central + the relay-enabled peripheral; see
+        # tests/zmk-config/build-usb-split.yaml.
+        run: >-
+          west zmk-build tests/zmk-config
+          --build-yaml tests/zmk-config/build-usb-split.yaml -af usb-wired-central &&
+          west zmk-build tests/zmk-config
+          --build-yaml tests/zmk-config/build-usb-split.yaml -af usb-wired-peripheral
+      - name: Run split-relay round-trip test
+        # zmk-west-commands' composite action: caches/installs Renode + the
+        # python protobuf/protoc deps, then runs the generic usb+wired smoke
+        # (GetDeviceInfo over USB + a peripheral keypress relayed to the central)
+        # followed by this module's own tests/renode/*_test.py -- the host reads
+        # AND writes the split PERIPHERAL's settings over the wired split relay.
+        uses: cormoran/zmk-west-commands/.github/actions/zmk-renode-test@main
+        with:
+          mode: wired-split
+          elf-path: build/usb-wired-central/zephyr/zmk.elf
+          peripheral-elf: build/usb-wired-peripheral/zephyr/zmk.elf
+          tests: tests/renode
+
+  keepalive:
+    if: github.event_name == 'schedule'
+    permissions: write-all
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Re-enable workflow to avoid deactivating scheduled runs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_REPO: ${{ github.repository }}
+        run: |
+          gh workflow enable zmk-module.yml

@@ -1,0 +1,8 @@
+# Copyright (c) 2026 ZitaoTech
+# SPDX-License-Identifier: MIT
+
+description: Independent touchpad and TrackPoint DPI adjustment behavior
+
+compatible: "zmk,behavior-pointing-dpi"
+
+include: two_param.yaml

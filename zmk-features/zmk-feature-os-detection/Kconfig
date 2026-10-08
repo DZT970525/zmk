@@ -1,0 +1,101 @@
+config ZMK_OS_DETECTION
+    bool "Enable OS detection feature"
+
+if ZMK_OS_DETECTION
+
+config ZMK_OS_DETECTION_STUDIO_RPC
+    bool "Enable OS detection custom Studio RPC"
+    depends on ZMK_STUDIO
+
+config ZMK_OS_DETECTION_USB
+    bool "Detect host OS via USB enumeration fingerprint"
+    depends on ZMK_USB
+    select USB_DEVICE_BOS
+
+config ZMK_OS_DETECTION_USB_SETTLE_MS
+    int "Debounce (ms) after the last SETUP packet before finalizing the USB guess"
+    depends on ZMK_OS_DETECTION_USB
+    default 200
+
+config ZMK_OS_DETECTION_BLE
+    bool "Detect host OS via BLE GATT access fingerprint"
+    depends on ZMK_BLE
+    select BT_GATT_AUTHORIZATION_CUSTOM
+    # The per-profile detected/override state is persisted as two array
+    # settings (see src/os_detection_settings.c), compiled whenever
+    # zmk-feature-custom-settings is present. That module gates its array
+    # support behind ZMK_CUSTOM_SETTINGS_ARRAY (default y), so force it on
+    # to keep the build working even if a keyboard disabled it to save flash.
+    select ZMK_CUSTOM_SETTINGS_ARRAY if ZMK_CUSTOM_SETTINGS
+
+config ZMK_OS_DETECTION_BLE_SETTLE_MS
+    int "Debounce (ms) after the last fingerprint GATT read before finalizing the BLE guess"
+    depends on ZMK_OS_DETECTION_BLE
+    default 1000
+    help
+      A host reads the fingerprint characteristics (HID report map, DIS PnP ID,
+      GAP Appearance, ...) in a burst during GATT service discovery. Once no
+      such read has arrived for this long, the per-profile guess is finalized
+      and further reads on that profile - including endless Battery Level polls -
+      are ignored until it reconnects. Larger than the USB debounce because BLE
+      discovery reads are spread across a slower connection interval.
+
+config ZMK_OS_DETECTION_BLE_GATT_CLIENT_PROBE
+    bool "Opt-in: discover ANCS/AMS/Device Name as a GATT client after pairing"
+    depends on ZMK_OS_DETECTION_BLE
+    select BT_GATT_CLIENT
+
+config ZMK_OS_DETECTION_LAYER_AUTO_SWITCH
+    bool "Auto-activate a keymap layer based on the detected OS"
+    default n
+    help
+      This overlaps with https://github.com/cormoran/zmk-feature-default-layer,
+      which is the recommended way to auto-switch a default layer per host
+      and supports more selection criteria than just the detected OS.
+      Leave this off (the default) and use that module instead unless you
+      specifically want layer selection driven only by this module's OS
+      detection, with no extra module dependency.
+
+if ZMK_OS_DETECTION_LAYER_AUTO_SWITCH
+
+config ZMK_OS_DETECTION_LAYER_WINDOWS
+    int "Layer to auto-activate when Windows is detected (-1 disables)"
+    default -1
+
+config ZMK_OS_DETECTION_LAYER_MACOS
+    int "Layer to auto-activate when macOS is detected (-1 disables)"
+    default -1
+
+config ZMK_OS_DETECTION_LAYER_LINUX
+    int "Layer to auto-activate when Linux is detected (-1 disables)"
+    default -1
+
+config ZMK_OS_DETECTION_LAYER_IOS
+    int "Layer to auto-activate when iOS is detected (-1 disables)"
+    default -1
+
+config ZMK_OS_DETECTION_LAYER_ANDROID
+    int "Layer to auto-activate when Android is detected over BLE (-1 disables)"
+    default -1
+
+config ZMK_OS_DETECTION_LAYER_UNKNOWN
+    int "Layer to auto-activate when the OS is unknown (-1 disables)"
+    default -1
+
+endif # ZMK_OS_DETECTION_LAYER_AUTO_SWITCH
+
+config ZMK_OS_DETECTION_TEST_INJECT
+    bool "Test-only: inject recorded fingerprints instead of observing real hardware"
+    default n
+    help
+      For unit tests only (set from tests/*/native_sim.conf). Feeds recorded
+      USB SETUP sequences and BLE stat snapshots into the classifiers at
+      boot, since native_sim has no USB device controller and no BLE.
+      Runs all recorded scenarios sequentially in one process (rather than
+      one process per scenario) because the native_sim USB device
+      controller's USB/IP emulation binds a fixed TCP port
+      (usb_dc_native_posix_adapt.c, port 3240): two CONFIG_ZMK_USB=y
+      native_sim processes running in parallel would otherwise collide on
+      that port.
+
+endif

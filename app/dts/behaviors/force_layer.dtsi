@@ -1,0 +1,9 @@
+/ {
+    behaviors {
+        force_layer: force_layer {
+            compatible = "zmk,behavior-force-layer";
+            #binding-cells = <1>;
+            display-name = "Force Layer";
+        };
+    };
+};

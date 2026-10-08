@@ -1,0 +1,58 @@
+.app {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.card {
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.btn {
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.input-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.response-box {
+  margin-top: 1rem;
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+}
+
+.response-box pre {
+  margin: 0;
+  overflow-x: auto;
+}
+
+.ble-profile-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+
+.ble-profile-table th,
+.ble-profile-table td {
+  border: 1px solid #ccc;
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+}
+
+.ble-profile-table tr.active-profile {
+  background: rgba(100, 150, 255, 0.15);
+  font-weight: bold;
+}

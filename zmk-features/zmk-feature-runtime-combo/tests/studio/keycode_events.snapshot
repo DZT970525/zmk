@@ -1,0 +1,5 @@
+cormoran__runtime_combo, Security: Unsecured
+cormoran_custom_settings, Security: Unsecured
+PASS: runtime_combo_test_setup
+pressed: position 4 keycode 0x70005
+released: position 4 keycode 0x70005

@@ -1,0 +1,29 @@
+# Copyright (c) 2024 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: Runtime configurable sensor rotate behavior
+
+compatible: "zmk,behavior-runtime-sensor-rotate"
+
+properties:
+  label:
+    type: string
+    required: false
+    deprecated: true
+  "#sensor-binding-cells":
+    type: int
+    required: true
+    const: 0
+  tap-ms:
+    type: int
+    default: 5
+  cw-binding:
+    type: phandle-array
+    required: false
+    specifier-space: binding
+    description: Behavior binding for clockwise rotation (e.g., <&kp C_VOL_UP>)
+  ccw-binding:
+    type: phandle-array
+    required: false
+    specifier-space: binding
+    description: Behavior binding for counter-clockwise rotation (e.g., <&kp C_VOL_DN>)

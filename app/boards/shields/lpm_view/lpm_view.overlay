@@ -10,11 +10,12 @@
         compatible = "jdi,lpm009m360a";
         spi-max-frequency = <4000000>;
         reg = <0>;
-				width = <144>;
-				height = <72>;
-				color_mode = [02];
-				reverse = <1>; 
-				rotation = <1>;
+        width = <144>;
+        height = <72>;
+        /* 8 colors: every dot is transferred as a red, green and blue bit */
+        color_mode = [00];
+        reverse = <0>;
+        rotation = <1>;
     };
 };
 

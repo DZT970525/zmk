@@ -1,0 +1,137 @@
+.app {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.card {
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.btn {
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.error-message {
+  color: #c00;
+  padding: 0.5rem;
+  border: 1px solid #c00;
+  border-radius: 4px;
+  margin: 0.5rem 0;
+}
+
+.warning-message {
+  color: #a60;
+  padding: 0.5rem;
+  border: 1px solid #a60;
+  border-radius: 4px;
+  margin: 0.5rem 0;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.panel-header h2 {
+  margin: 0;
+}
+
+.panel-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.device-info-display details {
+  margin: 0.75rem 0;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+}
+
+.device-info-display details summary {
+  cursor: pointer;
+  user-select: none;
+  padding: 0.25rem 0;
+}
+
+.info-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.5rem;
+}
+
+.info-table td {
+  padding: 0.25rem 0.5rem;
+  vertical-align: top;
+}
+
+.info-label {
+  font-weight: bold;
+  white-space: nowrap;
+  width: 40%;
+  color: #555;
+}
+
+.info-value {
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.badge-dirty {
+  color: #a60;
+  font-style: italic;
+}
+
+.badge-ok {
+  color: #060;
+  font-size: 0.85em;
+  margin-left: 0.5rem;
+}
+
+.badge-error {
+  color: #c00;
+  font-size: 0.85em;
+  margin-left: 0.5rem;
+}
+
+.device-list {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.device-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: monospace;
+  font-size: 0.9em;
+  padding: 0.1rem 0.25rem;
+}
+
+.device-ok {
+  color: #060;
+}
+
+.device-fail {
+  color: #c00;
+  font-weight: bold;
+}
+
+.device-status {
+  width: 1em;
+  text-align: center;
+}

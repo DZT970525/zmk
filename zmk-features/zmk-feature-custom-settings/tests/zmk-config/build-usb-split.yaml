@@ -1,0 +1,63 @@
+# Real-hardware DUT images for `west zmk-renode-test --mode wired-split` (= the
+# usb-host-link x wired-split-link combination). Builds BOTH halves of a WIRED
+# split keyboard, routing the custom-settings split RPC relay so a Studio host
+# talking to the central OVER USB can read AND write the PERIPHERAL's settings
+# across the wired split event relay:
+#
+#   * usb-wired-central  = custom_settings_usb_wired_split_left  = split CENTRAL.
+#     Runs ZMK Studio over USB CDC (studio-rpc-usb-uart) + the custom-settings
+#     Studio RPC + the split RPC relay bridge (central role). Speaks the wired
+#     split on uart1.
+#   * usb-wired-peripheral = custom_settings_usb_wired_split_right = split
+#     PERIPHERAL. Registers the same zmk_config_sample settings + the split RPC
+#     relay (peripheral role). The central relays list/write RPCs here and
+#     forwards the peripheral's setting notifications back to the host.
+#
+# Why usb+wired: a WIRED split whose central STILL speaks Studio. USB consumes no
+# UARTE, so the central keeps its console on uart0 AND drives the zmk,wired-split
+# link on uart1 while Studio RPC rides the emulated USB CDC. The relayed setting
+# notifications round-trip this way with no radio cap and no Renode Studio-UART
+# TX path in the way.
+#
+# The custom-settings feature toggles live here (as cmake-args, mirroring
+# build.yaml's custom_settings_board_with_rpc) rather than in the shield conf, so
+# the same wired-split shield can be reused with different feature selections.
+# All five optional features are enabled so the relay carries every value type.
+#
+# Build both with:
+#   west zmk-build tests/zmk-config --build-yaml tests/zmk-config/build-usb-split.yaml -af usb-wired-central
+#   west zmk-build tests/zmk-config --build-yaml tests/zmk-config/build-usb-split.yaml -af usb-wired-peripheral
+#
+# Uses the wired split relay-event transport in the zmk revision pinned by
+# west/west-dependency/west-test-dependency.yml (main+custom-studio-protocol).
+include:
+  - artifact: usb-wired-central
+    board: xiao_ble//zmk
+    shield: custom_settings_usb_wired_split_left
+    snippet: studio-rpc-usb-uart
+    cmake-args: >-
+      -DCONFIG_ZMK_CUSTOM_SETTINGS=y
+      -DCONFIG_ZMK_CUSTOM_SETTINGS_STUDIO_RPC=y
+      -DCONFIG_ZMK_CUSTOM_SETTINGS_ZMK_CONFIG_SAMPLES=y
+      -DCONFIG_ZMK_STUDIO_RPC_RX_BUF_SIZE=128
+      -DCONFIG_ZMK_SPLIT_RELAY_EVENT=y
+      -DCONFIG_ZMK_CUSTOM_SETTINGS_SPLIT_RPC_RELAY=y
+      -DCONFIG_ZMK_CUSTOM_SETTINGS_LARGE_VALUES=y
+      -DCONFIG_ZMK_CUSTOM_SETTINGS_ARRAY=y
+      -DCONFIG_ZMK_CUSTOM_SETTINGS_KEYSPACE=y
+      -DCONFIG_ZMK_CUSTOM_SETTINGS_RPC_CONVERTERS=y
+      -DCONFIG_ZMK_CUSTOM_SETTINGS_RECORD=y
+
+  - artifact: usb-wired-peripheral
+    board: xiao_ble//zmk
+    shield: custom_settings_usb_wired_split_right
+    cmake-args: >-
+      -DCONFIG_ZMK_CUSTOM_SETTINGS=y
+      -DCONFIG_ZMK_CUSTOM_SETTINGS_ZMK_CONFIG_SAMPLES=y
+      -DCONFIG_ZMK_SPLIT_RELAY_EVENT=y
+      -DCONFIG_ZMK_CUSTOM_SETTINGS_SPLIT_RPC_RELAY=y
+      -DCONFIG_ZMK_CUSTOM_SETTINGS_LARGE_VALUES=y
+      -DCONFIG_ZMK_CUSTOM_SETTINGS_ARRAY=y
+      -DCONFIG_ZMK_CUSTOM_SETTINGS_KEYSPACE=y
+      -DCONFIG_ZMK_CUSTOM_SETTINGS_RPC_CONVERTERS=y
+      -DCONFIG_ZMK_CUSTOM_SETTINGS_RECORD=y

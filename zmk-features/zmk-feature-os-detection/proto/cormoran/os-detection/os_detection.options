@@ -1,0 +1,5 @@
+# Nanopb options file for os_detection.proto
+# This defines max sizes for string/repeated fields
+
+cormoran.os_detection.ErrorResponse.message         max_size:64
+cormoran.os_detection.StateResponse.ble_profiles    max_count:8

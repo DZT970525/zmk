@@ -1,0 +1,5 @@
+config SHIELD_CUSTOM_SETTINGS_USB_WIRED_SPLIT_LEFT
+    def_bool $(shields_list_contains,custom_settings_usb_wired_split_left)
+
+config SHIELD_CUSTOM_SETTINGS_USB_WIRED_SPLIT_RIGHT
+    def_bool $(shields_list_contains,custom_settings_usb_wired_split_right)

@@ -51,16 +51,27 @@ if ZMK_STUDIO_RPC
 
 menu "Transports"
 
+DT_CHOSEN_ZMK_STUDIO_RPC_UART := zmk,studio-rpc-uart
+
 config ZMK_STUDIO_TRANSPORT_UART
     bool "Serial"
     select SERIAL
     select RING_BUFFER
-    default y if ZMK_USB || ARCH_POSIX
+    default y if $(dt_chosen_enabled,$(DT_CHOSEN_ZMK_STUDIO_RPC_UART))
+
+if ZMK_STUDIO_TRANSPORT_UART
 
 config ZMK_STUDIO_TRANSPORT_UART_RX_STACK_SIZE
     int "RX Stack Size"
     depends on !UART_INTERRUPT_DRIVEN
     default 512
+
+config ZMK_STUDIO_TRANSPORT_UART_RX_PRIORITY
+    int "RX Thread Priority"
+    depends on !UART_INTERRUPT_DRIVEN
+    default 9
+
+endif
 
 config ZMK_STUDIO_TRANSPORT_BLE
     bool "BLE (GATT)"
@@ -69,8 +80,11 @@ config ZMK_STUDIO_TRANSPORT_BLE
     depends on ZMK_BLE
     default y
 
+
 config BT_CONN_TX_MAX
     default 64 if ZMK_STUDIO_TRANSPORT_BLE
+
+if ZMK_STUDIO_TRANSPORT_BLE
 
 config ZMK_STUDIO_TRANSPORT_BLE_PREF_LATENCY
     int "BLE Transport preferred latency"
@@ -78,6 +92,8 @@ config ZMK_STUDIO_TRANSPORT_BLE_PREF_LATENCY
     help
       When the studio UI is connected, a lower latency can be requested in order
       to make the interactions between keyboard and studio faster.
+
+endif
 
 endmenu
 
@@ -92,6 +108,25 @@ config ZMK_STUDIO_RPC_RX_BUF_SIZE
 config ZMK_STUDIO_RPC_TX_BUF_SIZE
     int "TX Buffer Size"
     default 64
+
+config ZMK_STUDIO_RPC_CUSTOM_SUBSYSTEM_PRINT_LIST_ON_START
+    bool "Print Custom Subsystem List on Start"
+    default n
+    help
+      Enable debug logging for custom subsystems on start.
+
+config ZMK_STUDIO_RPC_CUSTOM_SUBSYSTEM_IDENTIFIER_MAX_LEN
+    int "Custom Subsystem Identifier Max Length"
+    default 32
+
+config ZMK_STUDIO_RPC_CUSTOM_SUBSYSTEM_REQUEST_PAYLOAD_MAX_BYTES
+    int "Custom Subsystem Request Payload Max Bytes"
+    default ZMK_STUDIO_RPC_RX_BUF_SIZE
+    help
+      Maximum size of the payload in a custom subsystem request.
+      Defaults to ZMK_STUDIO_RPC_RX_BUF_SIZE so the generated custom subsystem request
+      payload capacity follows the configured RPC RX buffer size unless explicitly
+      overridden.
 
 endif
 

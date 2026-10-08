@@ -1,0 +1,36 @@
+config ZITAOTECH_BACKLIGHT_CONTROL
+    bool "ZitaoTech backlight control (runtime brightness + per-layer effects)"
+    select SETTINGS
+    help
+      Lets ZitaoTech Studio change the keyboard backlight brightness and pick a
+      per-layer effect for the layer indicator LED used by ZitaoTech boards.
+      Brightness and on/off live in ZMK's own backlight state (already
+      persisted); the per-layer effects are persisted by this module.
+
+if ZITAOTECH_BACKLIGHT_CONTROL
+
+config ZITAOTECH_BACKLIGHT_CONTROL_STUDIO_RPC
+    bool "Enable the ZitaoTech backlight custom Studio RPC"
+    depends on ZMK_STUDIO
+
+# Lowest / highest brightness the UI may select. ZMK's backlight itself uses
+# 0..100, but 0 means "dark", so the UI starts at 1 and the on/off switch is a
+# separate control.
+config ZITAOTECH_BACKLIGHT_BRT_MIN
+    int "Lowest selectable backlight brightness"
+    default 1
+
+config ZITAOTECH_BACKLIGHT_BRT_MAX
+    int "Highest selectable backlight brightness"
+    default 100
+
+config ZITAOTECH_BACKLIGHT_LAYER_COUNT
+    int "Number of configurable layer effects (layer 1..N)"
+    default 4
+    range 1 4
+    help
+      Layer 1..4 each get their own effect. Layer 0 has no setting (it always
+      follows the backlight). On ZitaoTech boards layer 4 is the automatic mouse
+      layer; it defaults to "same as backlight", like layer 0.
+
+endif # ZITAOTECH_BACKLIGHT_CONTROL

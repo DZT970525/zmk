@@ -1,0 +1,12 @@
+if SHIELD_RIGHT_TRACKPOINT_SOFLE
+
+config PWM
+    default y
+
+config LED
+    default y
+
+config LED_PWM
+    default y
+
+endif # SHIELD_RIGHT_TRACKPOINT_SOFLE

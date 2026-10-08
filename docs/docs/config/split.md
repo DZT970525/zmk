@@ -35,6 +35,14 @@ Following bluetooth [split keyboard](../features/split-keyboards.md) settings ar
 | `CONFIG_ZMK_SPLIT_BLE_PERIPHERAL_PRIORITY`              | int  | Priority of the BLE split peripheral notify thread                         | 5                                          |
 | `CONFIG_ZMK_SPLIT_BLE_PERIPHERAL_POSITION_QUEUE_SIZE`   | int  | Max number of key state events to queue to send to the central             | 10                                         |
 
+#### Input Split
+
+The following setting only applies when using BLE split together with [input split devices](pointing.md#input-split), such as for pointing devices attached to split peripherals:
+
+| Config                                  | Type | Description                                                     | Default |
+| --------------------------------------- | ---- | --------------------------------------------------------------- | ------- |
+| `CONFIG_ZMK_INPUT_SPLIT_MSG_QUEUE_SIZE` | int  | Max number of input split events to queue for BLE notifications | 32      |
+
 ### Wired Splits
 
 Hardware UARTs have a few different modes/approaches to sending and receiving data, with different levels of complexity and performance. Not all hardware nor drivers support all modes, so ZMK has code to support different interaction modes with the UART as needed. The default mode should be properly selected based on the platform's report support, but you can choose to override the mode if needed.
@@ -51,7 +59,7 @@ Following wired [split keyboard](../features/split-keyboards.md) settings are de
 
 | Config                                       | Type | Description                                                       | Default                                                       |
 | -------------------------------------------- | ---- | ----------------------------------------------------------------- | ------------------------------------------------------------- |
-| `CONFIG_ZMK_SPLIT_WIRED`                     | bool | Use wired connection to communicate between split keyboard halves | y (if no BLE split and devicetree is set appropriately)       |
+| `CONFIG_ZMK_SPLIT_WIRED`                     | bool | Use wired connection to communicate between split keyboard halves | y (if devicetree is set appropriately)                        |
 | `CONFIG_ZMK_SPLIT_WIRED_UART_MODE_ASYNC`     | bool | Async (DMA) mode                                                  | y if the driver supports it (excluding nRF52 with known bugs) |
 | `CONFIG_ZMK_SPLIT_WIRED_UART_MODE_INTERRUPT` | bool | Interrupt mode                                                    | y if the hardware supports it                                 |
 | `CONFIG_ZMK_SPLIT_WIRED_UART_MODE_POLLING`   | bool | Polling mode                                                      | y if neither other mode is supported                          |
@@ -76,7 +84,7 @@ The following settings only apply when using wired split in polling mode:
 
 ### Wired Split
 
-Wired splits require a properly configured UART to function. If writing a shield, you may be able to use the standard UART already provided by the board, e.g. `&pro_micro_serial`. See [predefined nodes](../development/hardware-integration/pinctrl.mdx#predefined-nodes) for details on the UART node labels provided by various interconnects. If you are creating your own board, or using custom pins for the UART, see the documentation on [pin control](../development/hardware-integration/pinctrl.mdx#additional-examples) to configure the pins for your UART.
+Wired splits require a properly configured UART to function. If writing a shield, you may be able to use the standard UART already provided by the board, e.g. `&pro_micro_serial`. See [predefined nodes](../hardware-integration/pinctrl.mdx#predefined-nodes) for details on the UART node labels provided by various interconnects. If you are creating your own board, or using custom pins for the UART, see the documentation on [pin control](../hardware-integration/pinctrl.mdx#additional-examples) to configure the pins for your UART.
 
 Once you have a properly configured UART device, it needs to be assigned in a new node with a compatible value of `"zmk,wired-split"`. For example:
 

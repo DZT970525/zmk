@@ -1,0 +1,16 @@
+# Nanopb options for custom_settings_relay.proto.
+
+cormoran.zmk.custom_settings.RelaySettingRef.custom_subsystem_id max_size:32
+cormoran.zmk.custom_settings.RelaySettingRef.key max_size:48
+cormoran.zmk.custom_settings.RelaySettingScope.custom_subsystem_id max_size:32
+cormoran.zmk.custom_settings.RelaySettingScope.key max_size:48
+cormoran.zmk.custom_settings.RelaySettingScope.key_prefix max_size:48
+cormoran.zmk.custom_settings.RelayNotification.custom_subsystem_id max_size:32
+cormoran.zmk.custom_settings.RelayNotification descriptorsize:DS_4
+
+# Same oneof-submessage-arm callback-wipe issue as Request in
+# custom_settings.options (see the comment there): the peripheral decodes
+# RelayRequest whose write_setting arm embeds a SettingValue with
+# FT_CALLBACK payload fields, so the inner callback must be wired from the
+# message-level cb_request_type hook, not before pb_decode().
+cormoran.zmk.custom_settings.RelayRequest submsg_callback:true

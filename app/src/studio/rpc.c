@@ -87,7 +87,7 @@ static bool rpc_read_cb(pb_istream_t *stream, uint8_t *buf, size_t count) {
 
     do {
         uint8_t *buffer;
-        uint32_t len = ring_buf_get_claim(&rpc_rx_buf, &buffer, count);
+        uint32_t len = ring_buf_get_claim(&rpc_rx_buf, &buffer, count - write_offset);
 
         if (len > 0) {
             for (int i = 0; i < len; i++) {
@@ -119,9 +119,27 @@ RING_BUF_DECLARE(rpc_tx_buf, CONFIG_ZMK_STUDIO_RPC_TX_BUF_SIZE);
 
 struct ring_buf *zmk_rpc_get_tx_buf(void) { return &rpc_tx_buf; }
 
+/*
+ * The TX ring buffer is drained by the USB class driver's work queue
+ * (usbworkq), which runs at the same cooperative priority as ZMK's system work
+ * queue.  A cooperative thread is never preempted by another thread at the
+ * same priority, so a caller that simply spins until there is room in the ring
+ * buffer deadlocks: the drainer can never be scheduled and the whole keyboard
+ * wedges.  That happened with the ZitaoTech trackpad state notification, which
+ * is raised from the system work queue (the &DPI keys) and encodes to more
+ * than the 64 byte default buffer, while the small backlight notification
+ * always fit and was unaffected.
+ *
+ * Yield instead, and give up after a bounded number of rounds so a host that
+ * stopped reading cannot freeze the keyboard either.  The dropped frame is
+ * harmless: the framing protocol resynchronises on the next SOF.
+ */
+#define RPC_TX_STALL_LIMIT 4096
+
 static bool rpc_tx_buffer_write(pb_ostream_t *stream, const uint8_t *buf, size_t count) {
     void *user_data = stream->state;
     size_t written = 0;
+    uint32_t stall_count = 0;
 
     bool escape_byte_already_written = false;
     do {
@@ -131,8 +149,16 @@ static bool rpc_tx_buffer_write(pb_ostream_t *stream, const uint8_t *buf, size_t
         uint32_t claim_len = ring_buf_put_claim(&rpc_tx_buf, &write_buf, count - written);
 
         if (claim_len == 0) {
+            if (stall_count++ >= RPC_TX_STALL_LIMIT) {
+                LOG_ERR("RPC TX buffer stalled, dropping response");
+                return false;
+            }
+            /* Let the transport drain the ring buffer. */
+            k_yield();
             continue;
         }
+
+        stall_count = 0;
 
         int escapes_written = 0;
         for (int i = 0; i < claim_len && write_idx < claim_len; i++) {
@@ -177,6 +203,8 @@ static pb_ostream_t pb_ostream_for_tx_buf(void *user_data) {
 }
 
 static int send_response(const zmk_studio_Response *resp) {
+    int ret = 0;
+
     k_mutex_lock(&rpc_transport_mutex, K_FOREVER);
 
     if (!selected_transport) {
@@ -199,7 +227,13 @@ static int send_response(const zmk_studio_Response *resp) {
 #if !IS_ENABLED(CONFIG_NANOPB_NO_ERRMSG)
         LOG_ERR("Failed to encode the message %s", stream.errmsg);
 #endif // !IS_ENABLED(CONFIG_NANOPB_NO_ERRMSG)
-        return -EINVAL;
+        /*
+         * Keep the transport mutex balanced: returning here without unlocking
+         * would deadlock every later response, including the ones raised from
+         * the keyboard itself.
+         */
+        ret = -EINVAL;
+        goto exit;
     }
 
     framing_byte = FRAMING_EOF;
@@ -209,7 +243,7 @@ static int send_response(const zmk_studio_Response *resp) {
 
 exit:
     k_mutex_unlock(&rpc_transport_mutex);
-    return 0;
+    return ret;
 }
 
 static void rpc_main(void) {
@@ -217,7 +251,7 @@ static void rpc_main(void) {
         pb_istream_t stream = pb_istream_for_rx_ring_buf();
         zmk_studio_Request req = zmk_studio_Request_init_zero;
 #if IS_ENABLED(CONFIG_THREAD_ANALYZER)
-        thread_analyzer_print();
+        thread_analyzer_print(0);
 #endif // IS_ENABLED(CONFIG_THREAD_ANALYZER)
         bool status = pb_decode(&stream, &zmk_studio_Request_msg, &req);
 
@@ -228,7 +262,7 @@ static void rpc_main(void) {
 
             int err = send_response(&resp);
 #if IS_ENABLED(CONFIG_THREAD_ANALYZER)
-            thread_analyzer_print();
+            thread_analyzer_print(0);
 #endif // IS_ENABLED(CONFIG_THREAD_ANALYZER)
             if (err < 0) {
                 LOG_ERR("Failed to send the RPC response %d", err);
@@ -243,7 +277,7 @@ K_THREAD_DEFINE(studio_rpc_thread, CONFIG_ZMK_STUDIO_RPC_THREAD_STACK_SIZE, rpc_
                 NULL, K_LOWEST_APPLICATION_THREAD_PRIO, 0, 0);
 
 static void refresh_selected_transport(void) {
-    enum zmk_transport transport = zmk_endpoints_selected().transport;
+    enum zmk_transport transport = zmk_endpoint_get_selected().transport;
 
     k_mutex_lock(&rpc_transport_mutex, K_FOREVER);
 

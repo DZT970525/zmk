@@ -6,16 +6,23 @@
 
 #include <errno.h>
 
+#include <zephyr/toolchain.h>
+
 #include <zmk/stdlib.h>
 #include <zmk/split/transport/peripheral.h>
 
 #include <drivers/behavior.h>
 #include <zmk/behavior.h>
+#include <zmk/physical_layouts.h>
 
 #include <zmk/event_manager.h>
 #include <zmk/events/position_state_changed.h>
 #include <zmk/events/sensor_event.h>
 #include <zmk/events/battery_state_changed.h>
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
+#include <zmk/events/hid_indicators_changed.h>
+#endif
 
 #include <zephyr/init.h>
 #include <zephyr/logging/log.h>
@@ -50,7 +57,17 @@ int zmk_split_transport_peripheral_command_handler(
         if (err) {
             LOG_ERR("Failed to invoke behavior %s: %d", binding.behavior_dev, err);
         }
+        return err;
     }
+    case ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_SET_PHYSICAL_LAYOUT: {
+        return zmk_physical_layouts_select(cmd.data.set_physical_layout.layout_idx);
+    }
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
+    case ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_SET_HID_INDICATORS: {
+        return raise_zmk_hid_indicators_changed((struct zmk_hid_indicators_changed){
+            .indicators = cmd.data.set_hid_indicators.indicators});
+    }
+#endif
     default:
         LOG_WRN("Unhandled command type %d", cmd.type);
         return -ENOTSUP;
@@ -66,6 +83,24 @@ int zmk_split_peripheral_report_event(const struct zmk_split_transport_periphera
 
     return active_transport->api->report_event(event);
 }
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+
+/*
+ * Peripheral -> central relaying: hand the event to whichever transport is
+ * active so, for example, this half's settings can be reported back to the
+ * central for the Studio UI.
+ */
+int zmk_split_relay_event_send(const struct zmk_split_relay_event_payload *payload) {
+    struct zmk_split_transport_peripheral_event event = {
+        .type = ZMK_SPLIT_TRANSPORT_PERIPHERAL_EVENT_TYPE_RELAY_EVENT,
+        .data = {.relay_event = *payload},
+    };
+
+    return zmk_split_peripheral_report_event(&event);
+}
+
+#endif // IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
 
 static int select_first_available_transport(void) {
     // Transports are sorted by priority, so find the first

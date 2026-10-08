@@ -1,0 +1,34 @@
+include:
+  - artifact: custom_settings_board_feature_disabled
+    board: xiao_ble//zmk
+    shield: tester_xiao
+
+  - artifact: custom_settings_board_with_rpc
+    board: xiao_ble//zmk
+    shield: tester_xiao
+    cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_CUSTOM_SETTINGS=y -DCONFIG_ZMK_CUSTOM_SETTINGS_STUDIO_RPC=y -DCONFIG_ZMK_CUSTOM_SETTINGS_ZMK_CONFIG_SAMPLES=y -DCONFIG_ZMK_STUDIO_RPC_RX_BUF_SIZE=128 -DCONFIG_ZMK_CUSTOM_SETTINGS_LARGE_VALUE_MAX_SIZE=256 -DCONFIG_ZMK_CUSTOM_SETTINGS_LARGE_VALUES=y -DCONFIG_ZMK_CUSTOM_SETTINGS_ARRAY=y -DCONFIG_ZMK_CUSTOM_SETTINGS_KEYSPACE=y -DCONFIG_ZMK_CUSTOM_SETTINGS_RPC_CONVERTERS=y -DCONFIG_ZMK_CUSTOM_SETTINGS_RECORD=y
+    snippet: studio-rpc-usb-uart
+
+  - artifact: custom_settings_board_without_rpc
+    board: xiao_ble//zmk
+    shield: tester_xiao
+    cmake-args: -DCONFIG_ZMK_CUSTOM_SETTINGS=y -DCONFIG_ZMK_CUSTOM_SETTINGS_ZMK_CONFIG_SAMPLES=y -DCONFIG_ZMK_CUSTOM_SETTINGS_LARGE_VALUE_MAX_SIZE=256 -DCONFIG_ZMK_CUSTOM_SETTINGS_LARGE_VALUES=y -DCONFIG_ZMK_CUSTOM_SETTINGS_ARRAY=y -DCONFIG_ZMK_CUSTOM_SETTINGS_KEYSPACE=y -DCONFIG_ZMK_CUSTOM_SETTINGS_RPC_CONVERTERS=y -DCONFIG_ZMK_CUSTOM_SETTINGS_RECORD=y
+
+  - artifact: custom_settings_board_minimal
+    board: xiao_ble//zmk
+    shield: tester_xiao
+    cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_CUSTOM_SETTINGS=y -DCONFIG_ZMK_CUSTOM_SETTINGS_STUDIO_RPC=y -DCONFIG_ZMK_CUSTOM_SETTINGS_ZMK_CONFIG_SAMPLES=y -DCONFIG_ZMK_STUDIO_RPC_RX_BUF_SIZE=128 -DCONFIG_ZMK_CUSTOM_SETTINGS_LARGE_VALUES=n -DCONFIG_ZMK_CUSTOM_SETTINGS_ARRAY=n -DCONFIG_ZMK_CUSTOM_SETTINGS_KEYSPACE=n -DCONFIG_ZMK_CUSTOM_SETTINGS_RPC_CONVERTERS=n -DCONFIG_ZMK_CUSTOM_SETTINGS_RECORD=n
+    snippet: studio-rpc-usb-uart
+
+  - artifact: custom_settings_split_peripheral_with_rpc_relay
+    board: xiao_ble//zmk
+    shield: tester_xiao
+    snippet: custom-settings-split-rpc-relay
+
+  - artifact: custom_settings_split_central_with_rpc_relay
+    board: xiao_ble//zmk
+    shield: tester_xiao
+    snippets:
+      - custom-settings-split-rpc-relay
+      - custom-settings-split-central
+      - studio-rpc-usb-uart

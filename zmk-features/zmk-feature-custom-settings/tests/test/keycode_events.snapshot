@@ -1,0 +1,56 @@
+PASS: custom_settings_validate_hid_usage
+PASS: custom_settings_validate_layer_id
+PASS: custom_settings_bytes_rpc_convert rpc=030201 internal=070809
+PASS: custom_settings_update_read scalar=25
+PASS: custom_settings_discard scalar=10
+PASS: custom_settings_save scalar=30
+PASS: custom_settings_load scalar=30
+PASS: custom_settings_discard_persistent scalar=30
+PASS: custom_settings_reset scalar=10
+PASS: custom_settings_validate_range
+PASS: custom_settings_save_default_deletes_record
+PASS: custom_settings_update_read array[1]=55 size=2
+PASS: custom_settings_save_required_array_items size=2
+PASS: custom_settings_save_discard array[1]=55 size=2
+PASS: custom_settings_grow_array array[2]=77 size=3
+PASS: custom_settings_reset array[1]=2 size=3
+PASS: custom_settings_pop_back array[2]=3 size=2
+PASS: custom_settings_push_back array[2]=88 size=3
+PASS: custom_settings_save_all_active_array_items size=3
+PASS: custom_settings_push_back_full size=3
+PASS: custom_settings_insert_at_middle array={1,99,2}
+PASS: custom_settings_insert_at_end array={1,99,77}
+PASS: custom_settings_insert_at_out_of_range
+PASS: custom_settings_remove_at_middle array={1,77} removed=99
+PASS: custom_settings_remove_at_out_of_range
+PASS: custom_settings_array_storage_backward_compat size=2 values={11,22}
+PASS: custom_settings_view_api int=42 bytes=05060708
+PASS: custom_settings_temporary_rollback scalar=10
+PASS: custom_settings_temporary_oversized size=33
+PASS: custom_settings_temporary_pool_exhausted
+PASS: custom_settings_temporary_pool_reclaimed
+PASS: custom_settings_view_pool_temp_slot_leak pool=16
+PASS: custom_settings_boot_default_override
+PASS: custom_settings_keyspace_create_and_scope_discovery count=3
+PASS: custom_settings_keyspace_delete_frees_slot
+PASS: custom_settings_keyspace_settings_load_rebind a=111 b=222 c=333
+PASS: custom_settings_keyspace_find_null_subsystem
+PASS: custom_settings_record speed=42 invert=1 label=abcdefg
+PASS: custom_settings_record_constraint_rejected
+PASS: custom_settings_record_schema_evolution speed=42 label=kept
+PASS: custom_settings_large_value size=256
+PASS: custom_settings_large_record id=1234 note_len=180 encoded=189
+PASS: custom_settings_string_no_truncation
+PASS: custom_settings_pool_write_and_read size=100
+PASS: custom_settings_pool_enospc
+PASS: custom_settings_pool_compaction size_a=20 size_b=100
+PASS: custom_settings_pool_grow size_a=70 size_b=100
+PASS: custom_settings_pool_release used_before=171 used_after=101
+PASS: custom_settings_pool_persist_discard size=100
+PASS: custom_settings_pool_string_member value=hello
+PASS: custom_settings_keyspace_large_value size=100
+PASS: custom_settings_keyspace_pool_overcommit created=4 max_entries=8
+PASS: custom_settings_initialized_event count=1
+zmk: Welcome to ZMK!
+pressed: position 0 keycode 0x70004
+released: position 0 keycode 0x70004
