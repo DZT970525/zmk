@@ -1,0 +1,20 @@
+# Copyright (c) 2025 ZitaoTech
+# SPDX-License-Identifier: MIT
+
+config BOARD_ZITAOTECH_KEYPOINT_LEFT
+    bool
+
+config BOARD_ZITAOTECH_KEYPOINT_RIGHT
+    bool
+
+config SOFLE_MODULAR_POINTING
+    bool "KEYPOINT automatic per-hand pointing modules"
+    select SHIELD_LEFT_BBTRACKPAD_KEYPOINT if BOARD_ZITAOTECH_KEYPOINT_LEFT || BOARD_ZITAOTECH_KEYPOINT_RIGHT
+    select SHIELD_RIGHT_TRACKPOINT_KEYPOINT if BOARD_ZITAOTECH_KEYPOINT_LEFT || BOARD_ZITAOTECH_KEYPOINT_RIGHT
+
+
+config ZITAOTECH_KEYPOINT_SCREEN
+    bool
+    default y if BOARD_ZITAOTECH_KEYPOINT_LEFT
+    help
+      Enable host telemetry and left image modes without a Dongle relay.

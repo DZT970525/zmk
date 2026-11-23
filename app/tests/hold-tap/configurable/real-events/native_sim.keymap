@@ -1,0 +1,45 @@
+#include <dt-bindings/zmk/keys.h>
+#include <behaviors.dtsi>
+#include <behaviors/configurable_mod_tap.dtsi>
+#include <dt-bindings/zmk/kscan_mock.h>
+
+/* Keyboard page, no implicit modifiers, timeout in the top 11 bits. */
+#define CMT_HOLD(key, ms) (((ms) << 21) | ((key) & 0xfff))
+
+/ {
+    keymap {
+        compatible = "zmk,keymap";
+        default_layer {
+            bindings = <
+                &configurable_mt CMT_HOLD(LEFT_SHIFT, 200) F
+                &configurable_mt CMT_HOLD(LEFT_CONTROL, 400) J
+                &kp D
+                &mt LEFT_ALT K
+            >;
+        };
+    };
+};
+
+&kscan {
+    events = <
+        /* 250 ms resolves as hold for the 200 ms key. */
+        ZMK_MOCK_PRESS(0,0,250)
+        ZMK_MOCK_RELEASE(0,0,30)
+        /* The same press duration resolves as tap for the 400 ms key. */
+        ZMK_MOCK_PRESS(0,1,250)
+        ZMK_MOCK_RELEASE(0,1,30)
+        /* More than 400 ms resolves as hold for that key. */
+        ZMK_MOCK_PRESS(0,1,450)
+        ZMK_MOCK_RELEASE(0,1,30)
+        /* Balanced: the other key's release triggers hold before timeout. */
+        ZMK_MOCK_PRESS(0,0,10)
+        ZMK_MOCK_PRESS(1,0,10)
+        ZMK_MOCK_RELEASE(1,0,10)
+        ZMK_MOCK_RELEASE(0,0,30)
+        /* Legacy &mt remains hold-preferred on the other key's press. */
+        ZMK_MOCK_PRESS(1,1,10)
+        ZMK_MOCK_PRESS(1,0,10)
+        ZMK_MOCK_RELEASE(1,0,10)
+        ZMK_MOCK_RELEASE(1,1,30)
+    >;
+};

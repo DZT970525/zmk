@@ -1,6 +1,7 @@
 config ZITAOTECH_BOOTMAGIC
     bool "ZitaoTech bootmagic (hold a key at power-up to enter the bootloader)"
     select SETTINGS
+    select HWINFO
     help
       QMK style bootmagic: while the keyboard boots, if the configured key is
       held it drops straight into the UF2 bootloader instead of starting ZMK.

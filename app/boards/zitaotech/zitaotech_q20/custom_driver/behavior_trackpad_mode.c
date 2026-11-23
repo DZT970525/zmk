@@ -30,7 +30,7 @@ LOG_MODULE_REGISTER(behavior_trackpad_mode, CONFIG_ZMK_LOG_LEVEL);
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
-/* Command codes.  The board keymap mirrors these (see zitaotech_q20.keymap). */
+/* Command codes.  The board keymap mirrors these (see hackberrypiq20.keymap). */
 #define TP_MODE_TOGGLE_CMD 0
 
 #if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
@@ -65,7 +65,13 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
     }
 
 #if IS_ENABLED(CONFIG_ZITAOTECH_TRACKPAD_CONTROL)
-    if (zitaotech_trackpad_toggle_mode() < 0) {
+#if IS_ENABLED(CONFIG_SOFLE_MODULAR_POINTING)
+    extern int sofle_modular_toggle_trackpad_mode(void);
+    int result=sofle_modular_toggle_trackpad_mode();
+#else
+    int result=zitaotech_trackpad_toggle_mode();
+#endif
+    if (result < 0) {
         /* Not an error: the key is assigned but switched off in Studio. */
         LOG_DBG("Trackpad mode switch key is disabled in ZitaoTech Studio");
     }

@@ -14,6 +14,9 @@
 
 #include <zmk/behavior.h>
 #include <zmk/endpoints.h>
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+#include <zmk/keypoint_relay.h>
+#endif
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
@@ -63,6 +66,12 @@ static const struct behavior_parameter_metadata metadata = {
 
 static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+    if (zmk_keypoint_relay_routed() && binding->param1 <= OUT_NONE) {
+        const uint8_t command = binding->param1;
+        return zmk_keypoint_relay_send(6, &command, sizeof(command));
+    }
+#endif
     switch (binding->param1) {
     case OUT_TOG:
         return zmk_endpoint_toggle_preferred_transport();

@@ -12,6 +12,7 @@
 
 #include <zmk/behavior.h>
 #include <zmk/hid.h>
+#include <zmk/keypoint_mouse_layer.h>
 #include <zephyr/input/input.h>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 
@@ -52,6 +53,13 @@ static void process_key_state(const struct device *dev, int32_t val, bool presse
 static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
     LOG_DBG("position %d keycode 0x%02X", event.position, binding->param1);
+
+#if (IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN) || IS_ENABLED(CONFIG_BOARD_BBP9981) || IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q10) || IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q20)) && IS_ENABLED(CONFIG_ZMK_INPUT_PROCESSOR_TEMP_LAYER)
+    /* Actual mouse-button presses only: a layer-tap hold emits no &mkp. */
+    if (binding->param1 & ((1U << ZMK_HID_MOUSE_NUM_BUTTONS) - 1U)) {
+        zmk_keypoint_mouse_layer_button_pressed();
+    }
+#endif
 
     process_key_state(zmk_behavior_get_binding(binding->behavior_dev), binding->param1, true);
 

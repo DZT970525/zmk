@@ -283,8 +283,35 @@ static int on_keymap_binding_released(struct zmk_behavior_binding *binding,
     return 0;
 }
 
+#if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
+/* X/Y are signed16 values packed into one uint32 parameter. Both halves of
+ * the signed metadata domain together cover every possible packed bit pattern.
+ * Keep param2 absent: this behavior has exactly one binding cell. */
+static const struct behavior_parameter_value_metadata axis_param_values[] = {
+    {.type = BEHAVIOR_PARAMETER_VALUE_TYPE_RANGE,
+     .range = {.min = 0, .max = INT32_MAX}},
+    {.type = BEHAVIOR_PARAMETER_VALUE_TYPE_RANGE,
+     .range = {.min = INT32_MIN, .max = -1}},
+};
+
+static const struct behavior_parameter_metadata_set axis_param_sets[] = {{
+    .param1_values = axis_param_values,
+    .param1_values_len = ARRAY_SIZE(axis_param_values),
+}};
+
+static const struct behavior_parameter_metadata axis_metadata = {
+    .sets = axis_param_sets,
+    .sets_len = ARRAY_SIZE(axis_param_sets),
+};
+#endif
+
 static const struct behavior_driver_api behavior_input_two_axis_driver_api = {
-    .binding_pressed = on_keymap_binding_pressed, .binding_released = on_keymap_binding_released};
+        .binding_pressed = on_keymap_binding_pressed,
+    .binding_released = on_keymap_binding_released,
+#if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
+    .parameter_metadata = &axis_metadata,
+#endif
+};
 
 #define ITA_INST(n)                                                                                \
     static struct behavior_input_two_axis_data behavior_input_two_axis_data_##n = {};              \

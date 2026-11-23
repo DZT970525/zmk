@@ -1,0 +1,9 @@
+/ { input_processors { keypoint_trackpad: keypoint_trackpad {
+    compatible = "zmk,input-processor-keypoint-trackpad";
+    #input-processor-cells = <0>;
+}; }; };
+&bbtrackpad_listener {
+    device = <&bbtrackpad>;
+    input-processors = <&zip_temp_layer 3 600>, <&keypoint_trackpad>,
+        <&ip_behaviors0>, <&ip_behaviors1>, <&ip_behaviors2>, <&ip_behaviors3>;
+};

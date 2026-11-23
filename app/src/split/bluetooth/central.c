@@ -6,6 +6,7 @@
  */
 
 #include <zephyr/types.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/init.h>
 
 #include <zephyr/bluetooth/bluetooth.h>
@@ -34,6 +35,13 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/pointing/input_split.h>
 #include <zmk/hid_indicators_types.h>
 #include <zmk/physical_layouts.h>
+#include <zmk/split/role.h>
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_DONGLE_PRESENCE_CLIENT)
+#include <zmk/split/dongle_presence.h>
+#endif
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_PEER_SELECTION)
+#include <zmk/split/peer_selection.h>
+#endif
 
 static int start_scanning(void);
 
@@ -45,8 +53,18 @@ enum peripheral_slot_state {
     PERIPHERAL_SLOT_STATE_CONNECTED,
 };
 
+#if (IS_ENABLED(CONFIG_BOARD_KEYPOINT_DONGLE) || IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE))
+#include <zmk/events/dongle_battery_state_changed.h>
+ZMK_EVENT_IMPL(zmk_dongle_battery_state_changed);
+#endif
+
 struct peripheral_slot {
     enum peripheral_slot_state state;
+#if (IS_ENABLED(CONFIG_BOARD_KEYPOINT_DONGLE) || IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE))
+    uint8_t battery_side; /* 0 unknown, 1 left, 2 right */
+    uint8_t display_battery_level;
+    bool display_battery_valid;
+#endif
     struct bt_conn *conn;
     struct bt_gatt_discover_params discover_params;
     struct bt_gatt_subscribe_params subscribe_params;
@@ -100,6 +118,18 @@ static bool input_slot_is_open(size_t i) {
     return i < ARRAY_SIZE(peripheral_input_slots) && peripheral_input_slots[i].conn == NULL;
 }
 
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_PEER_SELECTION)
+struct bt_conn *zmk_keypoint_input_peer_connection(uint8_t input_reg) {
+    if (!zmk_split_role_is_central()) return NULL;
+    for (size_t i = 0; i < ARRAY_SIZE(peripheral_input_slots); i++) {
+        if (peripheral_input_slots[i].conn && peripheral_input_slots[i].reg_valid &&
+            peripheral_input_slots[i].reg == input_reg)
+            return bt_conn_ref(peripheral_input_slots[i].conn);
+    }
+    return NULL;
+}
+#endif
+
 static bool input_slot_is_pending(size_t i) {
     return i < ARRAY_SIZE(peripheral_input_slots) && peripheral_input_slots[i].conn != NULL &&
            (!peripheral_input_slots[i].sub.value_handle ||
@@ -151,7 +181,21 @@ static bool is_enabled;
 
 static struct peripheral_slot peripherals[ZMK_SPLIT_BLE_PERIPHERAL_COUNT];
 
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN)
+static atomic_t keypoint_split_inputs, keypoint_split_input_drops;
+#endif
 static bool is_scanning = false;
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_PEER_SELECTION)
+/* Retry after the controller frees connection resources; leave active scans alone. */
+static void scan_retry_cb(struct k_work *work) {
+    ARG_UNUSED(work);
+    start_scanning();
+}
+static K_WORK_DELAYABLE_DEFINE(scan_retry_work, scan_retry_cb);
+static void split_central_recycled(void) {
+    k_work_reschedule(&scan_retry_work, K_MSEC(100));
+}
+#endif
 
 static const struct bt_uuid_128 split_service_uuid = BT_UUID_INIT_128(ZMK_SPLIT_BT_SERVICE_UUID);
 
@@ -204,6 +248,10 @@ int release_peripheral_slot(int index) {
         slot->conn = NULL;
     }
     slot->state = PERIPHERAL_SLOT_STATE_OPEN;
+#if (IS_ENABLED(CONFIG_BOARD_KEYPOINT_DONGLE) || IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE))
+    slot->battery_side = 0;
+    slot->display_battery_valid = false;
+#endif
 
     // Raise events releasing any active positions from this peripheral
     for (int i = 0; i < POSITION_STATE_DATA_LEN; i++) {
@@ -372,6 +420,8 @@ static uint8_t split_central_sensor_notify_func(struct bt_conn *conn,
 
 #if IS_ENABLED(CONFIG_ZMK_INPUT_SPLIT)
 
+static int dispatch_split_input(uint8_t source, struct zmk_split_transport_peripheral_event event);
+
 static uint8_t peripheral_input_event_notify_cb(struct bt_conn *conn,
                                                 struct bt_gatt_subscribe_params *params,
                                                 const void *data, uint16_t length) {
@@ -404,8 +454,23 @@ static uint8_t peripheral_input_event_notify_cb(struct bt_conn *conn,
                                        .value = payload.value,
                                    }}}};
 
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) && IS_ENABLED(CONFIG_INPUT_MODE_THREAD)
+            /* input_report(K_NO_WAIT) only queues the raw event to the existing
+             * input thread. Do not run processors in BT RX, nor route it through
+             * sysworkq first. Keep every input notification in arrival order. */
+            atomic_inc(&keypoint_split_inputs);
+            int err=dispatch_split_input(event_wrapper.source,event_wrapper.event);
+            if(err)atomic_inc(&keypoint_split_input_drops);
+#else
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN)
+            atomic_inc(&keypoint_split_inputs);
+            if(k_msgq_put(&peripheral_event_msgq, &event_wrapper, K_NO_WAIT))
+                atomic_inc(&keypoint_split_input_drops);
+#else
             k_msgq_put(&peripheral_event_msgq, &event_wrapper, K_NO_WAIT);
+#endif
             k_work_submit(&peripheral_event_work);
+#endif
             break;
         }
     }
@@ -462,6 +527,27 @@ static uint8_t split_central_notify_func(struct bt_conn *conn,
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING)
 
+#if (IS_ENABLED(CONFIG_BOARD_KEYPOINT_DONGLE) || IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE))
+/* Input device IDs are fixed by the shields, unlike Bluetooth connection slots.
+ * Keep early battery readings until CPF discovery identifies the physical side. */
+static void dongle_display_battery_publish(struct peripheral_slot *slot, uint8_t level) {
+    slot->display_battery_level = level;
+    slot->display_battery_valid = true;
+    if (slot->battery_side != 0) {
+        raise_zmk_dongle_battery_state_changed((struct zmk_dongle_battery_state_changed){
+            .side = slot->battery_side - 1, .level = level});
+    }
+}
+static void dongle_display_battery_identify(struct peripheral_slot *slot, uint8_t reg) {
+    if (reg == DT_REG_ADDR(DT_NODELABEL(bbtrackpad_split))) slot->battery_side = 1;
+    else if (reg == DT_REG_ADDR(DT_NODELABEL(trackpoint_split))) slot->battery_side = 2;
+    else return;
+    if (slot->display_battery_valid) {
+        dongle_display_battery_publish(slot, slot->display_battery_level);
+    }
+}
+#endif
+
 static uint8_t split_central_battery_level_notify_func(struct bt_conn *conn,
                                                        struct bt_gatt_subscribe_params *params,
                                                        const void *data, uint16_t length) {
@@ -485,6 +571,9 @@ static uint8_t split_central_battery_level_notify_func(struct bt_conn *conn,
 
     LOG_DBG("[BATTERY LEVEL NOTIFICATION] data %p length %u", data, length);
     uint8_t battery_level = ((uint8_t *)data)[0];
+#if (IS_ENABLED(CONFIG_BOARD_KEYPOINT_DONGLE) || IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE))
+    dongle_display_battery_publish(slot, battery_level);
+#endif
     LOG_DBG("Battery level: %u", battery_level);
 
     struct peripheral_event_wrapper ev = {
@@ -528,6 +617,9 @@ static uint8_t split_central_battery_level_read_func(struct bt_conn *conn, uint8
     }
 
     uint8_t battery_level = ((uint8_t *)data)[0];
+#if (IS_ENABLED(CONFIG_BOARD_KEYPOINT_DONGLE) || IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE))
+    dongle_display_battery_publish(slot, battery_level);
+#endif
 
     LOG_DBG("Battery level: %u", battery_level);
 
@@ -826,6 +918,9 @@ static uint8_t split_central_chrc_discovery_func(struct bt_conn *conn,
                 // a missing CPF payload as reg 0 instead of dereferencing NULL.
                 input_slot->reg = cpf ? cpf->description : 0;
                 input_slot->reg_valid = true;
+#if (IS_ENABLED(CONFIG_BOARD_KEYPOINT_DONGLE) || IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE)) && IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING)
+                dongle_display_battery_identify(slot, input_slot->reg);
+#endif
                 input_slot->sub.notify = peripheral_input_event_notify_cb;
                 input_slot->sub.value = BT_GATT_CCC_NOTIFY;
                 int err = split_central_subscribe(conn, &input_slot->sub);
@@ -957,14 +1052,14 @@ static void split_central_process_connection(struct bt_conn *conn) {
 
 static int stop_scanning(void) {
     LOG_DBG("Stopping peripheral scanning");
-    is_scanning = false;
 
     int err = bt_le_scan_stop();
-    if (err < 0) {
+    if (err < 0 && err != -EALREADY) {
         LOG_ERR("Stop LE scan failed (err %d)", err);
         return err;
     }
 
+    is_scanning = false;
     return 0;
 }
 
@@ -984,6 +1079,10 @@ static bool split_central_eir_found(const bt_addr_le_t *addr) {
     // Stop scanning so we can connect to the peripheral device.
     int err = stop_scanning();
     if (err < 0) {
+        release_peripheral_slot(slot_idx);
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_PEER_SELECTION)
+        k_work_reschedule(&scan_retry_work, K_MSEC(1000));
+#endif
         return false;
     }
 
@@ -1041,8 +1140,27 @@ static bool split_central_eir_parse(struct bt_data *data, void *user_data) {
     return true;
 }
 
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_PEER_SELECTION)
+struct peer_ad_check { bool found; bool matches; };
+static bool peer_ad_check_target(struct bt_data *data, void *user_data) {
+    struct peer_ad_check *check = user_data;
+    if (data->type != BT_DATA_MANUFACTURER_DATA || data->data_len != 6 ||
+        data->data[0] != 0xff || data->data[1] != 0xff || data->data[2] != 0xd1) return true;
+    check->found = true;
+    uint8_t local = zmk_keypoint_local_peer_kind();
+    check->matches = data->data[3] == 1 && data->data[4] == local &&
+        (data->data[5] == ZMK_KEYPOINT_PEER_RIGHT ||
+         (local == ZMK_KEYPOINT_PEER_DONGLE && data->data[5] == ZMK_KEYPOINT_PEER_LEFT));
+    return false;
+}
+#endif
+
 static void split_central_device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
                                        struct net_buf_simple *ad) {
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_DONGLE_PRESENCE_CLIENT)
+    if ((type==BT_GAP_ADV_TYPE_ADV_DIRECT_IND || type==BT_GAP_ADV_TYPE_ADV_IND) &&
+        zmk_keypoint_presence_probe_advertisement(addr)) { return; }
+#endif
     char dev[BT_ADDR_LE_STR_LEN];
 
     bt_addr_le_to_str(addr, dev, sizeof(dev));
@@ -1050,6 +1168,12 @@ static void split_central_device_found(const bt_addr_le_t *addr, int8_t rssi, ui
 
     /* We're only interested in connectable events */
     if (type == BT_GAP_ADV_TYPE_ADV_IND) {
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_PEER_SELECTION)
+        struct net_buf_simple copy = *ad;
+        struct peer_ad_check check = {0};
+        bt_data_parse(&copy, peer_ad_check_target, &check);
+        if (!check.found || !check.matches) return;
+#endif
         bt_data_parse(ad, split_central_eir_parse, (void *)addr);
     } else if (type == BT_GAP_ADV_TYPE_ADV_DIRECT_IND) {
         split_central_eir_found(addr);
@@ -1057,6 +1181,7 @@ static void split_central_device_found(const bt_addr_le_t *addr, int8_t rssi, ui
 }
 
 static int start_scanning(void) {
+    if (IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_RECEIVER)) return 0;
     if (!is_enabled) {
         LOG_DBG("Not scanning, we're disabled");
         return 0;
@@ -1069,13 +1194,17 @@ static int start_scanning(void) {
     }
 
     // If all the devices are connected, there is no need to scan.
-    bool has_unconnected = false;
+    bool split_peripheral_missing = false;
     for (int i = 0; i < CONFIG_ZMK_SPLIT_BLE_CENTRAL_PERIPHERALS; i++) {
         if (peripherals[i].conn == NULL) {
-            has_unconnected = true;
+            split_peripheral_missing = true;
             break;
         }
     }
+    bool has_unconnected = split_peripheral_missing;
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_DONGLE_PRESENCE_CLIENT)
+    has_unconnected=has_unconnected || !zmk_split_role_standalone_selected();
+#endif
     if (!has_unconnected) {
         LOG_DBG("All devices are connected, scanning is unnecessary");
         return 0;
@@ -1083,8 +1212,29 @@ static int start_scanning(void) {
 
     // Start scanning otherwise.
     is_scanning = true;
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_PEER_SELECTION)
+    struct bt_le_scan_param scan = {
+        .type = BT_LE_SCAN_TYPE_PASSIVE,
+        .interval = 1600, /* 1000 ms, in 0.625 ms units */
+        .window = 16,     /* 10 ms */
+    };
+#if defined(CONFIG_BOARD_SOFLE_DONGLE_LEFT) || defined(CONFIG_BOARD_ZITAOTECH_KEYPOINT_LEFT)
+    /* Sample more often while the right is missing. Keep presence-only scans sparse. */
+    if (split_peripheral_missing) {
+        scan.interval = 320; /* 200 ms */
+        scan.window = 8;     /* 5 ms */
+    }
+#endif
+    int err = bt_le_scan_start(&scan, split_central_device_found);
+#else
     int err = bt_le_scan_start(BT_LE_SCAN_PASSIVE, split_central_device_found);
+#endif
+    if (err == -EALREADY) return 0;
     if (err < 0) {
+        is_scanning = false;
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_PEER_SELECTION)
+        k_work_reschedule(&scan_retry_work, K_MSEC(1000));
+#endif
         LOG_ERR("Scanning failed to start (err %d)", err);
         return err;
     }
@@ -1093,7 +1243,21 @@ static int start_scanning(void) {
     return 0;
 }
 
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_DONGLE_PRESENCE_CLIENT)
+int zmk_keypoint_presence_scan_pause(void) { return stop_scanning(); }
+int zmk_keypoint_presence_scan_resume(void) { return start_scanning(); }
+#endif
+
 static void split_central_connected(struct bt_conn *conn, uint8_t conn_err) {
+    if (IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_RECEIVER)) return;
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_DONGLE_PRESENCE_CLIENT)
+    if (zmk_keypoint_presence_probe_connection(conn)) { return; }
+#endif
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RUNTIME_ROLE)
+    if (!zmk_split_role_is_central()) {
+        return;
+    }
+#endif
     char addr[BT_ADDR_LE_STR_LEN];
     struct bt_conn_info info;
 
@@ -1123,12 +1287,24 @@ static void split_central_connected(struct bt_conn *conn, uint8_t conn_err) {
 }
 
 static void split_central_disconnected(struct bt_conn *conn, uint8_t reason) {
+    if (IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_RECEIVER)) return;
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RUNTIME_ROLE)
+    /* Host and dongle connections share Bluetooth callbacks. They are not
+     * right-hand slots and must never generate a peripheral battery event. */
+    if (!zmk_split_role_is_central() || !peripheral_slot_for_conn(conn)) {
+        return;
+    }
+#endif
     char addr[BT_ADDR_LE_STR_LEN];
     int err;
 
     bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
     LOG_DBG("Disconnected: %s (reason %d)", addr, reason);
+#if (IS_ENABLED(CONFIG_BOARD_KEYPOINT_DONGLE) || IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE)) && IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING)
+    struct peripheral_slot *display_slot = peripheral_slot_for_conn(conn);
+    if (display_slot) dongle_display_battery_publish(display_slot, 0);
+#endif
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING)
     struct peripheral_event_wrapper ev = {
@@ -1178,6 +1354,9 @@ static void split_central_security_changed(struct bt_conn *conn, bt_security_t l
 }
 
 static struct bt_conn_cb conn_callbacks = {
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_PEER_SELECTION)
+    .recycled = split_central_recycled,
+#endif
     .connected = split_central_connected,
     .disconnected = split_central_disconnected,
     .security_changed = split_central_security_changed,
@@ -1463,6 +1642,11 @@ static const struct zmk_split_transport_central_api central_api = {
 };
 
 ZMK_SPLIT_TRANSPORT_CENTRAL_REGISTER(bt_central, &central_api, CONFIG_ZMK_SPLIT_BLE_PRIORITY);
+#if IS_ENABLED(CONFIG_ZMK_INPUT_SPLIT)
+static int dispatch_split_input(uint8_t source, struct zmk_split_transport_peripheral_event event) {
+    return zmk_split_transport_central_peripheral_event_handler(&bt_central,source,event);
+}
+#endif
 
 static void notify_transport_status(void) {
     if (transport_status_cb) {
@@ -1482,12 +1666,39 @@ static int finish_init() {
 
 void peripheral_event_work_callback(struct k_work *work) {
     struct peripheral_event_wrapper ev;
+    unsigned processed = 0;
     while (k_msgq_get(&peripheral_event_msgq, &ev, K_NO_WAIT) == 0) {
         LOG_DBG("Trigger key position state change of type %d", ev.event.type);
         zmk_split_transport_central_peripheral_event_handler(&bt_central, ev.source, ev.event);
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN)
+        /* Continuous pointer input must not monopolize the system workqueue:
+         * advertising and reconnect work use the same queue. Preserve FIFO. */
+        if (++processed >= 16) {
+            if (k_msgq_num_used_get(&peripheral_event_msgq)) k_work_submit(work);
+            break;
+        }
+#else
+        ARG_UNUSED(processed);
+#endif
     }
 }
 
-
-
-
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN)
+static void keypoint_split_diag_conn(struct bt_conn *conn,void *context) {
+    struct bt_conn_info info;
+    if(!peripheral_slot_for_conn(conn) || bt_conn_get_info(conn,&info) ||
+       info.role!=BT_CONN_ROLE_CENTRAL)return;
+    uint8_t *bytes=context;
+    bytes[0]=info.state;
+    bytes[1]=bt_conn_get_security(conn);
+    sys_put_le16(info.le.interval,bytes+2);
+    sys_put_le16(info.le.latency,bytes+4);
+    sys_put_le16(info.le.timeout,bytes+6);
+}
+void zmk_split_central_link_diagnostics(uint8_t bytes[12]) {
+    memset(bytes,0,12);
+    bt_conn_foreach(BT_CONN_TYPE_LE,keypoint_split_diag_conn,bytes);
+    sys_put_le16(atomic_get(&keypoint_split_inputs),bytes+8);
+    sys_put_le16(atomic_get(&keypoint_split_input_drops),bytes+10);
+}
+#endif

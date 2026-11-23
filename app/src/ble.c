@@ -5,6 +5,7 @@
  */
 
 #include <zephyr/device.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/init.h>
 
 #include <errno.h>
@@ -32,6 +33,12 @@
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include <zmk/ble.h>
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+#include <zmk/keypoint_relay.h>
+#endif
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_DONGLE_PRESENCE_SERVER) || IS_ENABLED(CONFIG_ZMK_KEYPOINT_DONGLE_PRESENCE_CLIENT)
+#include <zmk/split/dongle_presence.h>
+#endif
 #include <zmk/keys.h>
 #include <zmk/split/bluetooth/uuid.h>
 #include <zmk/event_manager.h>
@@ -61,6 +68,16 @@ enum advertising_type {
 
 static struct zmk_ble_profile profiles[ZMK_BLE_PROFILE_COUNT];
 static uint8_t active_profile;
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_RECEIVER)
+static bool host_enabled = true;
+#endif
+bool zmk_ble_host_is_enabled(void) {
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_RECEIVER)
+    return host_enabled;
+#else
+    return true;
+#endif
+}
 
 #define DEVICE_NAME CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
@@ -174,13 +191,19 @@ bool zmk_ble_profile_is_connected(uint8_t index) {
     }                                                                                              \
     advertising_status = ZMK_ADV_CONN;
 
+#include <zmk/split/role.h>
 int update_advertising(void) {
+    if (!zmk_split_role_is_central()) {
+        return 0;
+    }
     int err = 0;
     bt_addr_le_t *addr;
     struct bt_conn *conn;
     enum advertising_type desired_adv = ZMK_ADV_NONE;
 
-    if (zmk_ble_active_profile_is_open()) {
+    if (!zmk_ble_host_is_enabled()) {
+        desired_adv = ZMK_ADV_NONE;
+    } else if (zmk_ble_active_profile_is_open()) {
         desired_adv = ZMK_ADV_CONN;
     } else if (!zmk_ble_active_profile_is_connected()) {
         desired_adv = ZMK_ADV_CONN;
@@ -219,9 +242,126 @@ int update_advertising(void) {
     return 0;
 };
 
-static void update_advertising_callback(struct k_work *work) { update_advertising(); }
-
-K_WORK_DEFINE(update_advertising_work, update_advertising_callback);
+static void update_advertising_callback(struct k_work *work);
+K_WORK_DELAYABLE_DEFINE(update_advertising_work, update_advertising_callback);
+static void update_advertising_callback(struct k_work *work) {
+    ARG_UNUSED(work);
+    int ret = update_advertising();
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN) || ((IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || ((IS_ENABLED(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE))))
+    /* A disconnected connection may not have recycled its controller slot yet. */
+    if (ret == -ENOMEM || ret == -EAGAIN || ret == -EBUSY)
+        k_work_reschedule(&update_advertising_work, K_MSEC(100));
+#endif
+}
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN) || ((IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || ((IS_ENABLED(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE))))
+static atomic_t host_tune_reset = ATOMIC_INIT(1);
+static int64_t host_param_requested_at = -5000;
+static atomic_t host_disconnect_reason, host_param_requests;
+uint8_t zmk_ble_host_param_request_count(void) { return atomic_get(&host_param_requests); }
+uint8_t zmk_ble_last_host_disconnect_reason(void) { return atomic_get(&host_disconnect_reason); }
+static void keypoint_host_tune(struct k_work *work);
+K_WORK_DELAYABLE_DEFINE(keypoint_host_tune_work, keypoint_host_tune);
+/* Idle computer BLE is still scheduled by the controller even when all input
+ * goes through the receiver. Keep the bond/connection, but reduce its airtime. */
+static bool host_link_idle(void) {
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+    return zmk_keypoint_relay_routed();
+#else
+    return false;
+#endif
+}
+static bool host_link_matches(uint16_t interval,uint16_t latency,uint16_t timeout) {
+    if(host_link_idle())return interval>=24 && interval<=40 && latency==4 && timeout>=400;
+    return interval>=CONFIG_BT_PERIPHERAL_PREF_MIN_INT && interval<=CONFIG_BT_PERIPHERAL_PREF_MAX_INT && !latency && timeout>=CONFIG_BT_PERIPHERAL_PREF_TIMEOUT;
+}
+static void keypoint_host_tune(struct k_work *work) {
+    ARG_UNUSED(work);
+    static int requested_mode=-1;
+#if !IS_ENABLED(CONFIG_ZITAOTECH_BBP9981_SOFLE_BLE) && ((defined(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)))
+    static bool security_requested;
+#endif
+    struct bt_conn *conn=zmk_ble_active_profile_conn();
+    if(!conn)return;
+    int mode=host_link_idle()?1:0;
+    bool reset=atomic_cas(&host_tune_reset,1,0);
+    if(reset || requested_mode!=mode){
+        requested_mode=mode;host_param_requested_at=-5000;atomic_clear(&host_param_requests);
+#if !IS_ENABLED(CONFIG_ZITAOTECH_BBP9981_SOFLE_BLE) && ((defined(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)))
+        security_requested=false;
+#endif
+    }
+    struct bt_conn_info info;
+    if(bt_conn_get_security(conn)<BT_SECURITY_L2){
+#if !IS_ENABLED(CONFIG_ZITAOTECH_BBP9981_SOFLE_BLE) && ((defined(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)))
+        /* Give bonded centrals time to restore encryption themselves. Repeated
+         * Security Requests during their reconnect sequence can cause a loop.
+         * security_changed resumes parameter tuning after encryption succeeds. */
+        if (!security_requested) {
+            security_requested=true;
+            int ret=bt_conn_set_security(conn,BT_SECURITY_L2);
+            if (ret && ret!=-EALREADY && ret!=-EBUSY)
+                LOG_WRN("Host reconnect security request failed (%d)",ret);
+        }
+#else
+        int ret=bt_conn_set_security(conn,BT_SECURITY_L2);
+        if(!ret || ret==-EALREADY || ret==-EBUSY)k_work_reschedule(&keypoint_host_tune_work,K_MSEC(500));
+#endif
+        bt_conn_unref(conn);return;
+    }
+#if IS_ENABLED(CONFIG_ZMK_SOFLE_TEST_DISABLE_HOST_PARAM_TUNE)
+    /* Isolate the effect of host parameter requests without changing SMP. */
+    bt_conn_unref(conn);
+    return;
+#endif
+    if(!bt_conn_get_info(conn,&info) && info.state==BT_CONN_STATE_CONNECTED &&
+       info.role==BT_CONN_ROLE_PERIPHERAL && !host_link_matches(info.le.interval,info.le.latency,info.le.timeout)) {
+        if(atomic_get(&host_param_requests)>=3){bt_conn_unref(conn);return;}
+        int64_t now=k_uptime_get();
+        if(now-host_param_requested_at<5000){
+            k_work_reschedule(&keypoint_host_tune_work,K_MSEC(5000-(now-host_param_requested_at)));
+            bt_conn_unref(conn);return;
+        }
+        const struct bt_le_conn_param *params=mode?BT_LE_CONN_PARAM(24,40,4,400):
+            BT_LE_CONN_PARAM(CONFIG_BT_PERIPHERAL_PREF_MIN_INT,CONFIG_BT_PERIPHERAL_PREF_MAX_INT,0,CONFIG_BT_PERIPHERAL_PREF_TIMEOUT);
+        bt_conn_le_param_update(conn,params);
+        /* Count even rejected/busy attempts; never run an endless 500ms loop.
+         * Verify the actual negotiated values, including hosts declining changes. */
+        host_param_requested_at=now;atomic_inc(&host_param_requests);
+        k_work_reschedule(&keypoint_host_tune_work,K_SECONDS(5));
+    }
+    bt_conn_unref(conn);
+}
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+static int relay_host_route_changed(const zmk_event_t *event) {
+    ARG_UNUSED(event);
+    /* Repeated relay/status events do not reset the per-route retry budget. */
+    k_work_reschedule(&keypoint_host_tune_work,K_MSEC(100));
+    return ZMK_EV_EVENT_BUBBLE;
+}
+ZMK_LISTENER(relay_host_route,relay_host_route_changed);
+ZMK_SUBSCRIPTION(relay_host_route,zmk_keypoint_relay_changed);
+#endif
+static void keypoint_host_recycled(void) {
+    if (zmk_split_role_is_central())
+        k_work_reschedule(&update_advertising_work, K_NO_WAIT);
+}
+#endif
+int zmk_ble_host_set_enabled(bool enabled) {
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_RECEIVER)
+    if (host_enabled == enabled) return 0;
+    uint8_t value = enabled;
+    int ret = settings_save_one("ble/host_enabled", &value, sizeof(value));
+    if (ret) return ret;
+    host_enabled = enabled;
+    /* Only host-profile bonds use identity 0; relay identity 1 is untouched. */
+    if (!enabled) for (unsigned i = 0; i < ZMK_BLE_PROFILE_COUNT; i++) zmk_ble_prof_disconnect(i);
+    k_work_reschedule(&update_advertising_work, K_NO_WAIT);
+    k_work_submit(&raise_profile_changed_event_work);
+    return 0;
+#else
+    return -ENOTSUP;
+#endif
+}
 
 static void clear_profile_bond(uint8_t profile) {
     if (bt_addr_le_cmp(&profiles[profile].peer, BT_ADDR_LE_ANY)) {
@@ -296,10 +436,13 @@ int zmk_ble_prof_select(uint8_t index) {
 
     active_profile = index;
     ble_save_profile();
-
-    update_advertising();
-
+    /* Highlight the selected slot before doing Bluetooth controller work. */
     raise_profile_changed_event();
+    k_work_reschedule(&update_advertising_work, K_NO_WAIT);
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN) || ((IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || ((IS_ENABLED(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE))))
+    atomic_set(&host_tune_reset, 1);
+    k_work_reschedule(&keypoint_host_tune_work, K_MSEC(100));
+#endif
 
     return 0;
 };
@@ -422,6 +565,14 @@ static int ble_profiles_handle_set(const char *name, size_t len, settings_read_c
     const char *next;
 
     LOG_DBG("Setting BLE value %s", name);
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_RECEIVER)
+    if (!strcmp(name, "host_enabled")) {
+        uint8_t value;
+        if (len != 1 || read_cb(cb_arg, &value, 1) != 1 || value > 1) return -EINVAL;
+        host_enabled = value;
+        return 0;
+    }
+#endif
 
     if (settings_name_steq(name, "profiles", &next) && next) {
         char *endptr;
@@ -463,6 +614,10 @@ static int ble_profiles_handle_set(const char *name, size_t len, settings_read_c
             LOG_ERR("Failed to handle active profile from settings (err %d)", err);
             return err;
         }
+        /* Older builds exposed surplus bond slots as host profiles. */
+        if (active_profile >= ZMK_BLE_PROFILE_COUNT) {
+            active_profile = 0;
+        }
     }
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     else if (settings_name_steq(name, "peripheral_addresses", &next) && next) {
@@ -497,7 +652,45 @@ static bool is_conn_active_profile(const struct bt_conn *conn) {
     return bt_addr_le_cmp(bt_conn_get_dst(conn), &profiles[active_profile].peer) == 0;
 }
 
+#if (IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q20) || IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q10) || IS_ENABLED(CONFIG_BOARD_BBP9981)) && IS_ENABLED(CONFIG_ZMK_USB_LOGGING)
+static void q20_log_bond(const struct bt_bond_info *bond, void *data) {
+    ARG_UNUSED(data);
+    char address[BT_ADDR_LE_STR_LEN];
+    bt_addr_le_to_str(&bond->addr,address,sizeof(address));
+    LOG_INF("Host restored bond: %s, selected profile match=%d", address,
+            bt_addr_le_eq(&bond->addr,zmk_ble_active_profile_addr()));
+}
+#endif
+
+#if (defined(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE))
+struct host_bond_lookup { const bt_addr_le_t *peer; bool found; };
+static void host_find_bond(const struct bt_bond_info *bond, void *data) {
+    struct host_bond_lookup *lookup=data;
+    if (bt_addr_le_eq(&bond->addr,lookup->peer)) lookup->found=true;
+}
+static void host_start_first_pairing(struct bt_conn *conn) {
+    struct host_bond_lookup lookup={.peer=bt_conn_get_dst(conn)};
+    bt_foreach_bond(BT_ID_DEFAULT,host_find_bond,&lookup);
+    /* The reconnect grace period is only for a bond we actually restored.
+     * A new host needs an immediate security request to start first pairing. */
+    if (!lookup.found && bt_conn_get_security(conn)<BT_SECURITY_L2) {
+        int ret=bt_conn_set_security(conn,BT_SECURITY_L2);
+        if (ret && ret!=-EALREADY && ret!=-EBUSY)
+            LOG_WRN("First pairing security request failed (%d)",ret);
+    }
+}
+#endif
+
 static void connected(struct bt_conn *conn, uint8_t err) {
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+    if (zmk_keypoint_relay_is_connection(conn)) return;
+#endif
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_DONGLE_PRESENCE_SERVER)
+    if (zmk_keypoint_presence_is_control_connection(conn)) { return; }
+#endif
+    if (!zmk_split_role_is_central()) {
+        return;
+    }
     char addr[BT_ADDR_LE_STR_LEN];
     struct bt_conn_info info;
     LOG_DBG("Connected thread: %p", k_current_get());
@@ -514,21 +707,52 @@ static void connected(struct bt_conn *conn, uint8_t err) {
 
     if (err) {
         LOG_WRN("Failed to connect to %s (%u)", addr, err);
-        update_advertising();
+        k_work_reschedule(&update_advertising_work, K_NO_WAIT);
         return;
     }
 
     LOG_DBG("Connected %s", addr);
+#if !IS_ENABLED(CONFIG_ZITAOTECH_BBP9981_SOFLE_BLE) && ((defined(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)))
+    host_start_first_pairing(conn);
+#endif
+#if (IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q20) || IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q10) || IS_ENABLED(CONFIG_BOARD_BBP9981)) && IS_ENABLED(CONFIG_ZMK_USB_LOGGING)
+    LOG_INF("Host reconnect: profile=%u match=%d security=%u", active_profile,
+            is_conn_active_profile(conn),bt_conn_get_security(conn));
+    bt_foreach_bond(BT_ID_DEFAULT,q20_log_bond,NULL);
+#endif
 
-    update_advertising();
+    k_work_reschedule(&update_advertising_work, K_NO_WAIT);
 
     if (is_conn_active_profile(conn)) {
         LOG_DBG("Active profile connected");
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN) || ((IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || ((IS_ENABLED(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE))))
+        atomic_set(&host_tune_reset, 1);
+#if !IS_ENABLED(CONFIG_ZITAOTECH_BBP9981_SOFLE_BLE) && ((defined(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)))
+        k_work_reschedule(&keypoint_host_tune_work, K_SECONDS(2));
+#else
+        k_work_reschedule(&keypoint_host_tune_work, K_MSEC(100));
+#endif
+#endif
         k_work_submit(&raise_profile_changed_event_work);
     }
 }
 
+#if defined(CONFIG_BOARD_SOFLE_DONGLE_LEFT) || defined(CONFIG_BOARD_SOFLE_DONGLE) || defined(CONFIG_BOARD_ZITAOTECH_KEYPOINT_LEFT) || ((defined(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || ((defined(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE))))
+static void host_pair_cancel(struct bt_conn *conn);
+#endif
 static void disconnected(struct bt_conn *conn, uint8_t reason) {
+#if defined(CONFIG_BOARD_SOFLE_DONGLE_LEFT) || defined(CONFIG_BOARD_SOFLE_DONGLE) || defined(CONFIG_BOARD_ZITAOTECH_KEYPOINT_LEFT) || ((defined(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || ((defined(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE))))
+    host_pair_cancel(conn);
+#endif
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+    if (zmk_keypoint_relay_is_connection(conn)) return;
+#endif
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_DONGLE_PRESENCE_SERVER)
+    if (zmk_keypoint_presence_is_control_connection(conn)) { return; }
+#endif
+    if (!zmk_split_role_is_central()) {
+        return;
+    }
     char addr[BT_ADDR_LE_STR_LEN];
     struct bt_conn_info info;
 
@@ -545,10 +769,13 @@ static void disconnected(struct bt_conn *conn, uint8_t reason) {
 
     // We need to do this in a work callback, otherwise the advertising update will still see the
     // connection for a profile as active, and not start advertising yet.
-    k_work_submit(&update_advertising_work);
+    k_work_reschedule(&update_advertising_work, K_NO_WAIT);
 
     if (is_conn_active_profile(conn)) {
-        LOG_DBG("Active profile disconnected");
+        LOG_DBG("Active profile disconnected" );
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN) || ((IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || ((IS_ENABLED(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE))))
+        atomic_set(&host_disconnect_reason, reason);
+#endif
         k_work_submit(&raise_profile_changed_event_work);
     }
 }
@@ -560,6 +787,12 @@ static void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_
 
     if (!err) {
         LOG_DBG("Security changed: %s level %u", addr, level);
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN) || ((IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || ((IS_ENABLED(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE))))
+        if (is_conn_active_profile(conn) && level >= BT_SECURITY_L2) {
+            k_work_reschedule(&keypoint_host_tune_work, K_MSEC(200));
+            k_work_submit(&raise_profile_changed_event_work);
+        }
+#endif
     } else {
         LOG_ERR("Security failed: %s level %u err %d", addr, level, err);
     }
@@ -572,6 +805,10 @@ static void le_param_updated(struct bt_conn *conn, uint16_t interval, uint16_t l
     bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
     LOG_DBG("%s: interval %d latency %d timeout %d", addr, interval, latency, timeout);
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN) || ((IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || ((IS_ENABLED(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE))))
+    if (is_conn_active_profile(conn) && !host_link_matches(interval,latency,timeout))
+        k_work_reschedule(&keypoint_host_tune_work, K_MSEC(200));
+#endif
 }
 
 static struct bt_conn_cb conn_callbacks = {
@@ -579,6 +816,9 @@ static struct bt_conn_cb conn_callbacks = {
     .disconnected = disconnected,
     .security_changed = security_changed,
     .le_param_updated = le_param_updated,
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN) || ((IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || ((IS_ENABLED(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE))))
+    .recycled = keypoint_host_recycled,
+#endif
 };
 
 /*
@@ -605,7 +845,13 @@ static void auth_passkey_entry(struct bt_conn *conn) {
 
 #endif
 
+#if defined(CONFIG_BOARD_SOFLE_DONGLE_LEFT) || defined(CONFIG_BOARD_SOFLE_DONGLE) || defined(CONFIG_BOARD_ZITAOTECH_KEYPOINT_LEFT) || ((defined(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || ((defined(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE))))
+static void host_pair_cancel(struct bt_conn *conn);
+#endif
 static void auth_cancel(struct bt_conn *conn) {
+#if defined(CONFIG_BOARD_SOFLE_DONGLE_LEFT) || defined(CONFIG_BOARD_SOFLE_DONGLE) || defined(CONFIG_BOARD_ZITAOTECH_KEYPOINT_LEFT) || ((defined(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || ((defined(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE))))
+    host_pair_cancel(conn);
+#endif
     char addr[BT_ADDR_LE_STR_LEN];
 
     bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
@@ -622,14 +868,110 @@ static void auth_cancel(struct bt_conn *conn) {
     LOG_DBG("Pairing cancelled: %s", addr);
 }
 
+#if defined(CONFIG_BOARD_SOFLE_DONGLE_LEFT) || defined(CONFIG_BOARD_SOFLE_DONGLE) || defined(CONFIG_BOARD_ZITAOTECH_KEYPOINT_LEFT) || ((defined(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || ((defined(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE))))
+/* Experimental host replacement: keep the old slot until SMP succeeds. */
+static struct k_spinlock host_pair_lock;
+static struct bt_conn *host_pair_conn;
+static uint8_t host_pair_slot;
+static bt_addr_le_t host_pair_old;
+static bool host_pair_completed, host_pair_committing;
+static bool host_address_elsewhere(const bt_addr_le_t *address,uint8_t slot) {
+    for(int i=0;i<ZMK_BLE_PROFILE_COUNT;i++)
+        if(i!=slot && bt_addr_le_eq(address,&profiles[i].peer))return true;
+    return false;
+}
+static bool host_pair_capture(struct bt_conn *conn) {
+    k_spinlock_key_t key=k_spin_lock(&host_pair_lock);
+    bool allowed=!host_pair_committing && (!host_pair_conn || host_pair_conn==conn);
+    if(allowed && !host_pair_conn) {
+        host_pair_conn=bt_conn_ref(conn);host_pair_slot=active_profile;
+        bt_addr_le_copy(&host_pair_old,&profiles[active_profile].peer);host_pair_completed=false;
+    } else if(allowed && host_pair_slot!=active_profile)allowed=false;
+    k_spin_unlock(&host_pair_lock,key);return allowed;
+}
+static void host_pair_cancel(struct bt_conn *conn) {
+    k_spinlock_key_t key=k_spin_lock(&host_pair_lock);
+    struct bt_conn *old=host_pair_conn==conn ? host_pair_conn : NULL;
+    if(old){host_pair_conn=NULL;host_pair_completed=false;}
+    k_spin_unlock(&host_pair_lock,key);
+    if(old)bt_conn_unref(old);
+}
+static int host_pair_store_profile(uint8_t slot,const bt_addr_le_t *peer) {
+    struct zmk_ble_profile replacement=profiles[slot];
+    bt_addr_le_copy(&replacement.peer,peer);
+#if IS_ENABLED(CONFIG_SETTINGS)
+    char setting_name[17];snprintf(setting_name,sizeof(setting_name),"ble/profiles/%u",slot);
+    int rc=settings_save_one(setting_name,&replacement,sizeof(replacement));
+    if(rc)return rc;
+#endif
+    profiles[slot]=replacement;k_work_submit(&raise_profile_changed_event_work);return 0;
+}
+static void host_pair_commit(struct k_work *work) {
+    ARG_UNUSED(work);
+    k_spinlock_key_t key=k_spin_lock(&host_pair_lock);
+    struct bt_conn *conn=host_pair_completed ? host_pair_conn : NULL;
+    uint8_t slot=host_pair_slot;bt_addr_le_t old=host_pair_old;
+    if(conn){host_pair_conn=NULL;host_pair_completed=false;host_pair_committing=true;}
+    k_spin_unlock(&host_pair_lock,key);
+    if(!conn)return;
+    const bt_addr_le_t *peer=bt_conn_get_dst(conn);
+    struct bt_conn_info info;
+    bool valid=!bt_conn_get_info(conn,&info) && info.state==BT_CONN_STATE_CONNECTED &&
+        bt_conn_get_security(conn)>=BT_SECURITY_L2 && active_profile==slot &&
+        bt_addr_le_eq(&profiles[slot].peer,&old) && !host_address_elsewhere(peer,slot) &&
+        (bt_addr_le_eq(&old,peer) || !zmk_ble_profile_is_connected(slot));
+    if(valid && host_pair_store_profile(slot,peer)==0) {
+        /* Delete only the replaced host bond, never other slots or receiver identity 1. */
+        if(!bt_addr_le_eq(&old,BT_ADDR_LE_ANY) && !bt_addr_le_eq(&old,peer) &&
+           !host_address_elsewhere(&old,slot))bt_unpair(BT_ID_DEFAULT,&old);
+        k_work_reschedule(&update_advertising_work,K_NO_WAIT);
+    } else {
+        bt_conn_disconnect(conn,BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+        if(!bt_addr_le_eq(peer,&profiles[slot].peer) && !host_address_elsewhere(peer,slot))
+            bt_unpair(BT_ID_DEFAULT,peer);
+    }
+    bt_conn_unref(conn);
+    key=k_spin_lock(&host_pair_lock);host_pair_committing=false;k_spin_unlock(&host_pair_lock,key);
+}
+K_WORK_DEFINE(host_pair_commit_work,host_pair_commit);
+#endif
+
 static bool pairing_allowed_for_current_profile(struct bt_conn *conn) {
+    if (!zmk_ble_host_is_enabled()) return false;
+    if (!zmk_split_role_is_central()) {
+        return true;
+    }
+#if defined(CONFIG_BOARD_SOFLE_DONGLE_LEFT) || defined(CONFIG_BOARD_SOFLE_DONGLE) || defined(CONFIG_BOARD_ZITAOTECH_KEYPOINT_LEFT) || ((defined(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || ((defined(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE))))
+    if(host_address_elsewhere(bt_conn_get_dst(conn),active_profile))return false;
+    if(zmk_ble_active_profile_is_open())return true;
+    if(!IS_ENABLED(CONFIG_BT_SMP_ALLOW_UNAUTH_OVERWRITE))return false;
+    if(bt_addr_le_eq(zmk_ble_active_profile_addr(),bt_conn_get_dst(conn)))return true;
+    /* New host may replace the selected slot only while its old host is offline. */
+    return !zmk_ble_active_profile_is_connected();
+#else
     return zmk_ble_active_profile_is_open() ||
            (IS_ENABLED(CONFIG_BT_SMP_ALLOW_UNAUTH_OVERWRITE) &&
             bt_addr_le_cmp(zmk_ble_active_profile_addr(), bt_conn_get_dst(conn)) == 0);
+#endif
 }
 
 static enum bt_security_err auth_pairing_accept(struct bt_conn *conn,
                                                 const struct bt_conn_pairing_feat *const feat) {
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_DONGLE_PRESENCE_CLIENT)
+    if (zmk_keypoint_presence_probe_connection(conn)) {
+        return BT_SECURITY_ERR_PAIR_NOT_ALLOWED;
+    }
+#endif
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_DONGLE_PRESENCE_SERVER)
+    /* Probe connections must reuse the split bond, never take a host slot or
+     * initiate a replacement pairing through the HID profile namespace. */
+    if (zmk_keypoint_presence_is_control_connection(conn)) {
+        return BT_SECURITY_ERR_PAIR_NOT_ALLOWED;
+    }
+#endif
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+    if (zmk_keypoint_relay_is_connection(conn)) return zmk_mac_pair_allowed(conn) ? BT_SECURITY_ERR_SUCCESS : BT_SECURITY_ERR_PAIR_NOT_ALLOWED;
+#endif
     struct bt_conn_info info;
     bt_conn_get_info(conn, &info);
 
@@ -639,10 +981,22 @@ static enum bt_security_err auth_pairing_accept(struct bt_conn *conn,
         return BT_SECURITY_ERR_PAIR_NOT_ALLOWED;
     }
 
+#if defined(CONFIG_BOARD_SOFLE_DONGLE_LEFT) || defined(CONFIG_BOARD_SOFLE_DONGLE) || defined(CONFIG_BOARD_ZITAOTECH_KEYPOINT_LEFT) || ((defined(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || ((defined(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE))))
+    if(info.role==BT_CONN_ROLE_PERIPHERAL && !host_pair_capture(conn))return BT_SECURITY_ERR_PAIR_NOT_ALLOWED;
+#endif
     return BT_SECURITY_ERR_SUCCESS;
 };
 
 static void auth_pairing_complete(struct bt_conn *conn, bool bonded) {
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+    if (zmk_keypoint_relay_is_connection(conn)) return;
+#endif
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_DONGLE_PRESENCE_SERVER)
+    if (zmk_keypoint_presence_is_control_connection(conn)) { return; }
+#endif
+    if (!zmk_split_role_is_central()) {
+        return;
+    }
     struct bt_conn_info info;
     char addr[BT_ADDR_LE_STR_LEN];
     const bt_addr_le_t *dst = bt_conn_get_dst(conn);
@@ -655,6 +1009,15 @@ static void auth_pairing_complete(struct bt_conn *conn, bool bonded) {
         return;
     }
 
+#if defined(CONFIG_BOARD_SOFLE_DONGLE_LEFT) || defined(CONFIG_BOARD_SOFLE_DONGLE) || defined(CONFIG_BOARD_ZITAOTECH_KEYPOINT_LEFT) || ((defined(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || ((defined(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE))))
+    k_spinlock_key_t key=k_spin_lock(&host_pair_lock);
+    bool captured=host_pair_conn==conn;
+    if(captured)host_pair_completed=true;
+    k_spin_unlock(&host_pair_lock,key);
+    if(captured)k_work_submit(&host_pair_commit_work);
+    else bt_conn_disconnect(conn,BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+    return;
+#endif
     if (!pairing_allowed_for_current_profile(conn)) {
         LOG_ERR("Pairing completed but current profile is not open: %s", addr);
         bt_unpair(BT_ID_DEFAULT, dst);
@@ -675,7 +1038,27 @@ static struct bt_conn_auth_cb zmk_ble_auth_cb_display = {
     .cancel = auth_cancel,
 };
 
+#if defined(CONFIG_BOARD_SOFLE_DONGLE_LEFT) || defined(CONFIG_BOARD_SOFLE_DONGLE) || defined(CONFIG_BOARD_ZITAOTECH_KEYPOINT_LEFT) || ((defined(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || ((defined(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE))))
+static void auth_host_pairing_failed(struct bt_conn *conn,enum bt_security_err reason) {
+#if (defined(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE))
+    LOG_WRN("Host pairing failed (security error %u)", reason);
+#else
+    ARG_UNUSED(reason);
+#endif
+    /* Relay pairing has its own identity and recovery handler. */
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+    if(zmk_keypoint_relay_is_connection(conn))return;
+#endif
+    struct bt_conn_info info;
+    if(!bt_conn_get_info(conn,&info) && info.role==BT_CONN_ROLE_PERIPHERAL) {
+        host_pair_cancel(conn);bt_conn_disconnect(conn,BT_HCI_ERR_AUTH_FAIL);
+    }
+}
+#endif
 static struct bt_conn_auth_info_cb zmk_ble_auth_info_cb_display = {
+#if defined(CONFIG_BOARD_SOFLE_DONGLE_LEFT) || defined(CONFIG_BOARD_SOFLE_DONGLE) || defined(CONFIG_BOARD_ZITAOTECH_KEYPOINT_LEFT) || ((defined(CONFIG_BOARD_ZITAOTECH_Q10) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || ((defined(CONFIG_BOARD_BBP9981) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE)) || (defined(CONFIG_BOARD_ZITAOTECH_Q20) && !IS_ENABLED(CONFIG_ZITAOTECH_Q20_LEGACY_BLE))))
+    .pairing_failed = auth_host_pairing_failed,
+#endif
     .pairing_complete = auth_pairing_complete,
 };
 
@@ -686,7 +1069,7 @@ static void zmk_ble_ready(int err) {
         return;
     }
 
-    update_advertising();
+    k_work_reschedule(&update_advertising_work, K_NO_WAIT);
 }
 
 static int zmk_ble_complete_startup(void) {

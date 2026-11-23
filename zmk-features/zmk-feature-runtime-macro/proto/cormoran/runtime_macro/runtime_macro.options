@@ -11,4 +11,4 @@ cormoran.runtime_macro.MacroDetail.steps       type:FT_CALLBACK
 cormoran.runtime_macro.KeyTapSequenceStep.packed_keys max_size:64
 cormoran.runtime_macro.ErrorResponse.message   max_size:96
 cormoran.runtime_macro.StatusResponse.message  max_size:96
-cormoran.runtime_macro.ListMacrosResponse.macros max_count:16
+cormoran.runtime_macro.ListMacrosResponse.macros max_count:32

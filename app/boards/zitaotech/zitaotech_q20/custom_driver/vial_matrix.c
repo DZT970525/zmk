@@ -325,8 +325,8 @@ static void keyboard_hid_out_poll(struct k_work *work) {
              * ID read as a bitmap, for instance, sets Num Lock and clears Caps
              * Lock, so the Caps Lock LED and scroll mode dropped out while the
              * lock was still on.  Hosts that use the interrupt OUT path send
-             * the report ID with the report; the keyboard's own Caps Lock key
-             * keeps the indicator right on hosts that do not report at all.
+             * the report ID with the report. Q20 uses the host's indicator
+             * state, so hosts must send a supported LED report to update it.
              */
             if ((length == sizeof(struct zmk_hid_led_report)) &&
                 (buffer[0] == ZMK_HID_REPORT_ID_LEDS)) {

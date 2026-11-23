@@ -13,6 +13,7 @@
 #include <drivers/behavior.h>
 
 #include <zmk/behavior.h>
+#include <zmk/bootloader_feedback.h>
 
 #if IS_ENABLED(CONFIG_RETENTION_BOOT_MODE)
 
@@ -43,7 +44,11 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
         return ZMK_BEHAVIOR_OPAQUE;
     }
 
-    sys_reboot(SYS_REBOOT_WARM);
+    if (cfg->boot_mode == BOOT_MODE_TYPE_BOOTLOADER) {
+        zmk_bootloader_feedback_reboot(SYS_REBOOT_WARM);
+    } else {
+        sys_reboot(SYS_REBOOT_WARM);
+    }
 #else
     // See
     // https://github.com/adafruit/Adafruit_nRF52_Bootloader/blob/d6b28e66053eea467166f44875e3c7ec741cb471/src/main.c#L107

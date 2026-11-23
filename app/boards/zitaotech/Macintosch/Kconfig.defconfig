@@ -1,0 +1,13 @@
+if BOARD_SOFLE_DONGLE || BOARD_SOFLE_DONGLE_LEFT || BOARD_SOFLE_DONGLE_RIGHT
+config ZMK_KEYBOARD_NAME
+    default "Macintosch"
+config ZMK_SPLIT
+    default y
+config ZMK_SPLIT_ROLE_CENTRAL
+    default y if BOARD_SOFLE_DONGLE
+    default n
+config ZMK_SPLIT_PERIPHERAL_HID_INDICATORS
+    default y
+config BT_CTLR
+    default BT
+endif

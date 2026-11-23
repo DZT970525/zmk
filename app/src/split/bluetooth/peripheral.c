@@ -36,18 +36,32 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/event_manager.h>
 #include <zmk/events/split_peripheral_status_changed.h>
 #include <zmk/ble.h>
+#include <zmk/split/role.h>
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_PEER_SELECTION)
+#include <zmk/split/peer_selection.h>
+static uint8_t peer_ad_marker[] = {0xff, 0xff, 0xd1, 1, ZMK_KEYPOINT_PEER_DONGLE, 0};
+#endif
 #include <zmk/split/bluetooth/uuid.h>
 
 static const struct bt_data zmk_ble_ad[] = {
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_PEER_SELECTION)
+    BT_DATA(BT_DATA_MANUFACTURER_DATA, peer_ad_marker, sizeof(peer_ad_marker)),
+#endif
+#if !IS_ENABLED(CONFIG_ZMK_KEYPOINT_PEER_SELECTION)
     BT_DATA_BYTES(BT_DATA_UUID16_SOME, 0x0f, 0x18 /* Battery Service */
                   ),
+#endif
     BT_DATA_BYTES(BT_DATA_UUID128_ALL, ZMK_SPLIT_BT_SERVICE_UUID)};
 
 static bool is_connected = false;
 
 static bool is_bonded = false;
 
+#define SPLIT_REPEAT_FAST_ADV                                                                        \
+    (IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE_RIGHT) || IS_ENABLED(CONFIG_BOARD_ZITAOTECH_KEYPOINT_RIGHT))
+
+#if !IS_ENABLED(CONFIG_ZMK_KEYPOINT_PEER_SELECTION)
 static void each_bond(const struct bt_bond_info *info, void *user_data) {
     bt_addr_le_t *addr = (bt_addr_le_t *)user_data;
 
@@ -55,11 +69,30 @@ static void each_bond(const struct bt_bond_info *info, void *user_data) {
         bt_addr_le_copy(addr, &info->addr);
     }
 }
+#else
+struct peer_bond_lookup { const bt_addr_le_t *address; bool found; };
+static void selected_peer_bond(const struct bt_bond_info *info, void *user_data) {
+    struct peer_bond_lookup *lookup = user_data;
+    if (bt_addr_le_eq(&info->addr, lookup->address)) lookup->found = true;
+}
+#endif
 
 static int start_advertising(bool low_duty) {
     bt_addr_le_t central_addr = bt_addr_le_none;
 
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_PEER_SELECTION)
+    int ret = zmk_keypoint_peer_target_address(&central_addr);
+    if (ret && ret != -ENOENT) return ret;
+    if (!ret) {
+        struct peer_bond_lookup lookup = {.address = &central_addr};
+        bt_foreach_bond(BT_ID_DEFAULT, selected_peer_bond, &lookup);
+        if (!lookup.found) central_addr = bt_addr_le_none;
+    }
+    peer_ad_marker[4] = zmk_keypoint_peer_target();
+    peer_ad_marker[5] = zmk_keypoint_local_peer_kind();
+#else
     bt_foreach_bond(BT_ID_DEFAULT, each_bond, &central_addr);
+#endif
 
     if (bt_addr_le_cmp(&central_addr, BT_ADDR_LE_NONE) != 0) {
         is_bonded = true;
@@ -76,6 +109,10 @@ static bool low_duty_advertising = false;
 static bool enabled = false;
 
 static void advertising_cb(struct k_work *work) {
+    if (SPLIT_REPEAT_FAST_ADV && (!enabled || is_connected)) {
+        return;
+    }
+
     const int err = start_advertising(low_duty_advertising);
     if (err < 0) {
         LOG_ERR("Failed to start advertising (%d)", err);
@@ -84,15 +121,34 @@ static void advertising_cb(struct k_work *work) {
 
 K_WORK_DEFINE(advertising_work, advertising_cb);
 
+int zmk_split_bt_peripheral_refresh_advertising(void) {
+    if (!enabled || zmk_split_role_is_central()) { return -ENOTSUP; }
+    if (is_connected) { return -EBUSY; }
+    int ret=bt_le_adv_stop();
+    if (ret && ret!=-EALREADY) { return ret; }
+    low_duty_advertising=false;
+    ret=k_work_submit(&advertising_work);
+    return ret<0 ? ret : 0;
+}
+
 static void connected(struct bt_conn *conn, uint8_t err) {
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RUNTIME_ROLE)
+    if (zmk_split_role_is_central()) {
+        return;
+    }
+#endif
     is_connected = (err == 0);
 
     raise_zmk_split_peripheral_status_changed(
         (struct zmk_split_peripheral_status_changed){.connected = is_connected});
 
     if (err == BT_HCI_ERR_ADV_TIMEOUT && enabled) {
-        low_duty_advertising = true;
-        k_work_submit(&advertising_work);
+        /* On these right halves, recycled() starts another fast directed burst
+         * once the controller's single connection slot is available again. */
+        if (!SPLIT_REPEAT_FAST_ADV) {
+            low_duty_advertising = true;
+            k_work_submit(&advertising_work);
+        }
     }
 }
 
@@ -104,6 +160,11 @@ static void recycled(void) {
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason) {
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RUNTIME_ROLE)
+    if (zmk_split_role_is_central()) {
+        return;
+    }
+#endif
     char addr[BT_ADDR_LE_STR_LEN];
 
     bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
@@ -267,12 +328,14 @@ static struct settings_handler ble_peripheral_settings_handler = {
 #endif // IS_ENABLED(CONFIG_SETTINGS)
 
 static int zmk_peripheral_ble_init(void) {
+#if !IS_ENABLED(CONFIG_ZMK_SPLIT_DUAL_ROLE_BUILD)
     int err = bt_enable(NULL);
 
     if (err) {
         LOG_ERR("BLUETOOTH FAILED (%d)", err);
         return err;
     }
+#endif
 
 #if IS_ENABLED(CONFIG_SETTINGS)
     settings_register(&ble_peripheral_settings_handler);

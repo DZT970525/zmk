@@ -14,7 +14,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define ZITAOTECH_SCREEN_IMAGE_SLOTS 2
+#define ZITAOTECH_SCREEN_IMAGE_SLOTS 20
 
 /** Largest picture we accept: 120x72 at 4bpp (RGB111). */
 #define ZITAOTECH_SCREEN_IMAGE_MAX_BYTES 4320
@@ -37,7 +37,12 @@ int zitaotech_screen_image_erase(uint32_t slot);
 
 bool zitaotech_screen_image_info(uint32_t slot, struct zitaotech_screen_image_info *out);
 
-/** Validated RAM copy loaded by the normal settings_load() path. */
+/** One reusable cache. Central data is available only for the latest upload. */
 const uint8_t *zitaotech_screen_image_data(uint32_t slot);
 
 int zitaotech_screen_image_last_slot(void);
+
+/** Shared RPC/USB upload staging; caller must own the upload/transfer lease. */
+uint8_t *zitaotech_screen_image_upload_buffer(uint8_t owner);
+void zitaotech_screen_image_upload_end(uint8_t owner);
+int zitaotech_screen_image_read_commit(uint32_t slot);

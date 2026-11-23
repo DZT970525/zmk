@@ -1,0 +1,4 @@
+/* No normal keymap input processors in settings-reset builds. */
+&trackpoint_listener { status = "disabled"; /delete-property/ input-processors; };
+&bbtrackpad_listener { status = "disabled"; /delete-property/ input-processors; };
+&bbtrackball_listener { status = "disabled"; /delete-property/ input-processors; };

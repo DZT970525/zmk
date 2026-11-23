@@ -6,13 +6,29 @@
 
 #pragma once
 
+
 #include <stdbool.h>
 #include <stdint.h>
+#include <errno.h>
 
 #include <zephyr/device.h>
 
 #ifdef __cplusplus
 extern "C" {
+#endif
+
+/* Extend a currently active automatic layer; never activate a manual layer. */
+void zmk_input_processor_temp_layer_extend(uint32_t layer, uint32_t extra_ms);
+
+/* Layer ID, rather than index; only owned, currently active temporary layers. */
+#if defined(CONFIG_ZMK_INPUT_PROCESSOR_TEMP_LAYER_PRIORITY)
+int zmk_input_processor_temp_layer_priority(void);
+bool zmk_input_processor_temp_layer_overlay_enabled(void);
+int zmk_input_processor_temp_layer_set_overlay(bool enabled);
+#else
+static inline int zmk_input_processor_temp_layer_priority(void) { return -1; }
+static inline bool zmk_input_processor_temp_layer_overlay_enabled(void) { return false; }
+static inline int zmk_input_processor_temp_layer_set_overlay(bool enabled) { return -ENOTSUP; }
 #endif
 
 /*

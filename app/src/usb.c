@@ -78,7 +78,9 @@ void usb_status_cb(enum usb_dc_status_code status, const uint8_t *params) {
 static int zmk_usb_init(void) {
     int usb_enable_ret;
 
+    LOG_INF("boot timing: USB enable start at %u ms", k_uptime_get_32());
     usb_enable_ret = usb_enable(usb_status_cb);
+    LOG_INF("boot timing: USB enable end at %u ms", k_uptime_get_32());
 
     if (usb_enable_ret != 0) {
         LOG_ERR("Unable to enable USB");

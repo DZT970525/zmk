@@ -96,7 +96,11 @@ static int hid_listener_keycode_released(const struct zmk_keycode_state_changed 
     return zmk_endpoint_send_report(ev->usage_page);
 }
 
+#include <zmk/split/role.h>
 int hid_listener(const zmk_event_t *eh) {
+    if (!zmk_keypoint_config_ready() || !zmk_split_role_is_central()) {
+        return ZMK_EV_EVENT_BUBBLE;
+    }
     const struct zmk_keycode_state_changed *ev = as_zmk_keycode_state_changed(eh);
     if (ev) {
         if (ev->state) {

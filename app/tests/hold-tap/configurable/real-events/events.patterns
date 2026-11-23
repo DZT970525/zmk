@@ -1,0 +1,2 @@
+s/.*hid_listener_keycode/kp/p
+s/.*decide_hold_tap/ht_decide/p

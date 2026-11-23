@@ -1,2 +1,2 @@
-zitaotech.trackpoint.State.driver_name max_size:16
+zitaotech.trackpoint.State.driver_name max_size:32
 zitaotech.trackpoint.Error.message max_size:96

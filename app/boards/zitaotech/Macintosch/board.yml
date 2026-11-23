@@ -1,0 +1,7 @@
+boards:
+  - name: sofle_dongle
+    vendor: zitaotech
+    socs:
+      - name: nrf52840
+        variants:
+          - name: zmk

@@ -10,6 +10,7 @@
 #include <pb_decode.h>
 #include <pb_encode.h>
 #include <stdio.h>
+#include <errno.h>
 #include <string.h>
 #include <zephyr/init.h>
 #include <zephyr/sys/util.h>
@@ -18,6 +19,9 @@
 
 #include <zitaotech/trackpoint/trackpoint.pb.h>
 #include <zitaotech/zmk/trackpoint.h>
+#if IS_ENABLED(CONFIG_ZITAOTECH_TRACKPOINT_VELOCITY_CURVE)
+#include <zitaotech/zmk/pointer_curve.h>
+#endif
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
@@ -66,6 +70,20 @@ static int trackpoint_subsystem_index(void) {
 
 static void fill_state(zitaotech_trackpoint_State *out) {
     out->supported = true;
+#if IS_ENABLED(CONFIG_ZITAOTECH_TRACKPOINT_VELOCITY_CURVE)
+    struct zitaotech_pointer_curve curve;
+    zitaotech_pointer_curve_get(&curve);
+    out->curve_supported = true;
+    out->curve_enabled = curve.enabled;
+    out->curve_vmax = curve.vmax;
+    out->curve_exponent = curve.exponent;
+    out->curve_minimum = curve.minimum;
+    out->curve_maximum = curve.maximum;
+    out->release_decay_supported = true;
+    out->release_decay = zitaotech_pointer_release_decay_get();
+    out->rise_rate_supported = true;
+    out->rise_rate = zitaotech_pointer_rise_rate_get();
+#endif
     strncpy(out->driver_name, CONFIG_ZITAOTECH_TRACKPOINT_DRIVER_NAME,
             sizeof(out->driver_name) - 1);
     out->dpi_index = zitaotech_trackpoint_dpi_index();
@@ -107,6 +125,9 @@ static void fill_state(zitaotech_trackpoint_State *out) {
     out->scroll_invert_y = zitaotech_trackpoint_scroll_invert_y();
     out->arrow_key = zitaotech_trackpoint_mode_key_position(ZITAOTECH_TRACKPOINT_MODE_ARROW);
     out->fast_key = zitaotech_trackpoint_mode_key_position(ZITAOTECH_TRACKPOINT_MODE_FAST);
+    out->fast_scroll_supported = true;
+    out->has_fast_scroll_key = true;
+    out->fast_scroll_key = zitaotech_trackpoint_mode_key_position(ZITAOTECH_TRACKPOINT_MODE_FAST_SCROLL);
     out->slow_key = zitaotech_trackpoint_mode_key_position(ZITAOTECH_TRACKPOINT_MODE_SLOW);
     out->arrow_swipe_threshold = zitaotech_trackpoint_arrow_swipe_threshold();
     out->arrow_swipe_min = CONFIG_ZITAOTECH_TRACKPOINT_ARROW_SWIPE_MIN;
@@ -169,6 +190,56 @@ static bool zitaotech_trackpoint_rpc_handle_request(const zmk_custom_CallRequest
     switch (req.which_request_type) {
     case zitaotech_trackpoint_Request_get_state_tag:
         break;
+    case zitaotech_trackpoint_Request_set_release_decay_tag: {
+#if IS_ENABLED(CONFIG_ZITAOTECH_TRACKPOINT_VELOCITY_CURVE)
+        uint32_t value = req.request_type.set_release_decay.value;
+        if (value < 1 || value > 100 || zitaotech_pointer_release_decay_set((uint8_t)value) < 0) {
+            fill_error(resp, "Release decay out of range");
+            zitaotech_trackpoint_suppress_notifications(false);
+            return true;
+        }
+#else
+        fill_error(resp, "Release decay is not supported by this firmware");
+        zitaotech_trackpoint_suppress_notifications(false);
+        return true;
+#endif
+        break;
+    }
+    case zitaotech_trackpoint_Request_set_rise_rate_tag: {
+#if IS_ENABLED(CONFIG_ZITAOTECH_TRACKPOINT_VELOCITY_CURVE)
+        uint32_t value = req.request_type.set_rise_rate.value;
+        if (value < 1 || value > 100 || zitaotech_pointer_rise_rate_set((uint8_t)value) < 0) {
+            fill_error(resp, "Rise rate out of range");
+            zitaotech_trackpoint_suppress_notifications(false);
+            return true;
+        }
+#else
+        fill_error(resp, "Rise rate is not supported by this firmware");
+        zitaotech_trackpoint_suppress_notifications(false);
+        return true;
+#endif
+        break;
+    }
+    case zitaotech_trackpoint_Request_set_pointer_curve_tag: {
+#if IS_ENABLED(CONFIG_ZITAOTECH_TRACKPOINT_VELOCITY_CURVE)
+        const zitaotech_trackpoint_SetPointerCurveRequest *p = &req.request_type.set_pointer_curve;
+        /* Check uint32 wire values before narrowing to the stored uint16s. */
+        struct zitaotech_pointer_curve c = {p->vmax, p->exponent, p->minimum, p->maximum, p->enabled};
+        int rc = (p->vmax > UINT16_MAX || p->exponent > UINT16_MAX ||
+                  p->minimum > UINT16_MAX || p->maximum > UINT16_MAX)
+                     ? -ERANGE : zitaotech_pointer_curve_set(&c);
+        if (rc < 0) {
+            fill_error(resp, "Curve values out of range or minimum exceeds maximum");
+            zitaotech_trackpoint_suppress_notifications(false);
+            return true;
+        }
+#else
+        fill_error(resp, "Pointer curve is not supported by this firmware");
+        zitaotech_trackpoint_suppress_notifications(false);
+        return true;
+#endif
+        break;
+    }
     case zitaotech_trackpoint_Request_set_dpi_tag: {
         int rc = zitaotech_trackpoint_set_dpi_index(req.request_type.set_dpi.dpi_index);
         if (rc < 0) {

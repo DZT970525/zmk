@@ -15,6 +15,7 @@ set(ZITAOTECH_FEATURE_MODULES
     ${ZITAOTECH_FEATURES_DIR}/zmk-behavior-runtime-sensor-rotate
     ${ZITAOTECH_FEATURES_DIR}/zmk-feature-custom-settings
     ${ZITAOTECH_FEATURES_DIR}/zmk-feature-runtime-macro
+    ${ZITAOTECH_FEATURES_DIR}/zmk-feature-runtime-tap-dance
     ${ZITAOTECH_FEATURES_DIR}/zmk-feature-runtime-combo
     ${ZITAOTECH_FEATURES_DIR}/zmk-feature-default-layer
     ${ZITAOTECH_FEATURES_DIR}/zmk-module-ble-management
@@ -104,8 +105,16 @@ if ((NOT CONFIG_ZMK_SPLIT) OR CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
   if (CONFIG_ZMK_BLE)
     target_sources(app PRIVATE src/events/ble_active_profile_changed.c)
     target_sources(app PRIVATE src/behaviors/behavior_bt.c)
-    target_sources(app PRIVATE src/ble.c)
-    target_sources(app PRIVATE src/hog.c)
+    if (CONFIG_ZITAOTECH_BBP9981_UPSTREAM_BLE)
+      if (CONFIG_ZITAOTECH_Q20_RECONNECT_RETRY)
+        target_sources(app PRIVATE boards/zitaotech/zitaotech_q20/custom_driver/ble_reconnect.c)
+      else()
+        target_sources(app PRIVATE src/bbp9981_upstream/ble.c)
+      endif()
+      target_sources(app PRIVATE src/bbp9981_upstream/hog.c src/bbp9981_upstream/compat.c)
+    else()
+      target_sources(app PRIVATE src/ble.c src/hog.c)
+    endif()
   endif()
 endif()
 
@@ -171,4 +180,8 @@ if (CONFIG_ZMK_STUDIO_RPC)
 endif()
 
 zephyr_cc_option(-Wfatal-errors)
+if((CONFIG_BOARD_SOFLE_DONGLE_LEFT OR CONFIG_BOARD_ZITAOTECH_KEYPOINT_LEFT) AND NOT CONFIG_ZMK_SETTINGS_RESET_ON_START)
+  target_sources(app PRIVATE src/mo_priority.c)
+endif()
 target_sources(app PRIVATE src/behaviors/behavior_force_layer.c)
+target_sources(app PRIVATE src/behaviors/behavior_keypoint_display_mode.c)

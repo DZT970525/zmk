@@ -103,6 +103,29 @@ ends up firing always uses only its own positions; any positions pressed while
 waiting on a longer candidate are replayed as normal key presses if that
 candidate never completes.
 
+## Release recovery
+
+Pending presses may be replayed through combo matching when a longer candidate
+fails. A release is resolved against any recaptured pending press before it is
+forwarded, and a combo must contain distinct pressed positions. This prevents a
+released position from remaining pending and completing a phantom combo on its
+next press.
+
+In the default fast-release mode, the first constituent release releases the
+combo output and immediately frees its active slot. The remaining constituent
+releases are consumed separately. If one of these releases is lost, it cannot
+reserve a combo slot indefinitely: a newer press at that position starts normally.
+Replayed copies of the original press remain consumed.
+
+Slow-release combos continue holding their output until their last constituent
+release. There is no idle timeout that could unexpectedly release a held modifier
+or layer. A newer press at a position still recorded as held reconciles that
+position's missing release. The binding and release policy are captured when a
+combo activates, so editing it in Studio does not change which output is released.
+This recovery does not guarantee delivery of missing scan or Bluetooth events;
+if every release of a held combo is lost, recovery requires another press of an
+affected position.
+
 ## User Guide
 
 1. Add the module to `config/west.yml`.

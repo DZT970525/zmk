@@ -1,3 +1,4 @@
+#include <zmk/pointing_profiles.h>
 /*
  * TrackPoint pointer speed (ten DPI steps) and burst mode.
  *
@@ -7,6 +8,7 @@
  */
 
 #include <zephyr/init.h>
+#include <zephyr/devicetree.h>
 #include <zephyr/kernel.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/sys/atomic.h>
@@ -18,12 +20,15 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/events/position_state_changed.h>
 
 #include <zitaotech/zmk/trackpoint.h>
+#if IS_ENABLED(CONFIG_ZITAOTECH_TRACKPOINT_VELOCITY_CURVE)
+#include <zitaotech/zmk/pointer_curve.h>
+#endif
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT)
 #include <zmk/split/central.h>
 #endif
 
-#define SETTINGS_PREFIX "zitaotech_trackpoint"
+#define SETTINGS_PREFIX "unified_trackpoint"
 
 #define DPI_MIN CONFIG_ZITAOTECH_TRACKPOINT_DPI_MIN
 #define DPI_MAX CONFIG_ZITAOTECH_TRACKPOINT_DPI_MAX
@@ -61,6 +66,22 @@ static atomic_t scroll_key_position = ATOMIC_INIT(CONFIG_ZITAOTECH_TRACKPOINT_SC
 static atomic_t mode_key_positions[ZITAOTECH_TRACKPOINT_MODE_COUNT];
 /* Bit per mode, set while that mode key is held (locally or relayed). */
 static atomic_t mode_key_pressed_mask = ATOMIC_INIT(0);
+/* Position 61 shares the mouse hold-tap timeout; other mode keys stay immediate. */
+#if DT_NODE_EXISTS(DT_NODELABEL(mouse_lt))
+#define MOUSE_SCROLL_HOLD_MS DT_PROP(DT_NODELABEL(mouse_lt), tapping_term_ms)
+#else
+#define MOUSE_SCROLL_HOLD_MS 0
+#endif
+static atomic_t scroll_key_pressed_at = ATOMIC_INIT(0);
+
+static void apply_mode_key_mask(uint8_t mask) {
+    uint8_t previous = (uint8_t)atomic_get(&mode_key_pressed_mask);
+    if ((mask & BIT(ZITAOTECH_TRACKPOINT_MODE_SCROLL)) &&
+        !(previous & BIT(ZITAOTECH_TRACKPOINT_MODE_SCROLL))) {
+        atomic_set(&scroll_key_pressed_at, (atomic_val_t)k_uptime_get_32());
+    }
+    atomic_set(&mode_key_pressed_mask, mask);
+}
 static atomic_t arrow_swipe_threshold =
     ATOMIC_INIT(CONFIG_ZITAOTECH_TRACKPOINT_ARROW_SWIPE_THRESHOLD);
 static atomic_t scroll_capslock_enabled = ATOMIC_INIT(0);
@@ -152,6 +173,9 @@ uint32_t zitaotech_trackpoint_scroll_multiplier(void) {
     if (zitaotech_trackpoint_scroll_burst_enabled()) {
         multiplier *= zitaotech_trackpoint_scroll_burst_multiplier();
     }
+    if (zitaotech_trackpoint_mode_key_pressed(ZITAOTECH_TRACKPOINT_MODE_FAST_SCROLL)) {
+        multiplier *= 2;
+    }
     return multiplier;
 }
 
@@ -170,10 +194,14 @@ int32_t zitaotech_trackpoint_mode_key_position(enum zitaotech_trackpoint_mode mo
 }
 
 bool zitaotech_trackpoint_mode_key_pressed(enum zitaotech_trackpoint_mode mode) {
-    if (mode >= ZITAOTECH_TRACKPOINT_MODE_COUNT) {
-        return false;
+    if (mode >= ZITAOTECH_TRACKPOINT_MODE_COUNT) return false;
+    if ((atomic_get(&mode_key_pressed_mask) & BIT(mode)) == 0) return false;
+    if (mode == ZITAOTECH_TRACKPOINT_MODE_SCROLL &&
+        zitaotech_trackpoint_mode_key_position(mode) == CONFIG_ZITAOTECH_TRACKPOINT_SCROLL_KEY_POSITION) {
+        uint32_t held_ms = k_uptime_get_32() - (uint32_t)atomic_get(&scroll_key_pressed_at);
+        return held_ms >= MOUSE_SCROLL_HOLD_MS;
     }
-    return (atomic_get(&mode_key_pressed_mask) & BIT(mode)) != 0;
+    return true;
 }
 
 int32_t zitaotech_trackpoint_scroll_key_position(void) {
@@ -182,6 +210,12 @@ int32_t zitaotech_trackpoint_scroll_key_position(void) {
 
 bool zitaotech_trackpoint_scroll_key_pressed(void) {
     return zitaotech_trackpoint_mode_key_pressed(ZITAOTECH_TRACKPOINT_MODE_SCROLL);
+}
+
+bool zitaotech_trackpoint_scroll_key_pending(void) {
+    return zitaotech_trackpoint_scroll_key_position() == CONFIG_ZITAOTECH_TRACKPOINT_SCROLL_KEY_POSITION &&
+        (atomic_get(&mode_key_pressed_mask) & BIT(ZITAOTECH_TRACKPOINT_MODE_SCROLL)) != 0 &&
+        (uint32_t)(k_uptime_get_32() - (uint32_t)atomic_get(&scroll_key_pressed_at)) < MOUSE_SCROLL_HOLD_MS;
 }
 
 uint32_t zitaotech_trackpoint_arrow_swipe_threshold(void) {
@@ -246,10 +280,9 @@ static int scroll_key_position_listener(const zmk_event_t *eh) {
         return ZMK_EV_EVENT_BUBBLE;
     }
 
+    apply_mode_key_mask(mask);
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) && IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
     raise_scroll_key(mask);
-#else
-    atomic_set(&mode_key_pressed_mask, mask);
 #endif
 
     return ZMK_EV_EVENT_BUBBLE;
@@ -264,7 +297,7 @@ static int scroll_key_listener(const zmk_event_t *eh) {
         return ZMK_EV_EVENT_BUBBLE;
     }
 
-    atomic_set(&mode_key_pressed_mask, ev->mask);
+    apply_mode_key_mask(ev->mask);
     return ZMK_EV_EVENT_BUBBLE;
 }
 
@@ -349,6 +382,9 @@ static void save_mode_keys(void) {
 }
 
 static void persist_all(void) {
+#if IS_ENABLED(CONFIG_ZITAOTECH_TRACKPOINT_VELOCITY_CURVE)
+    zitaotech_pointer_curve_save();
+#endif
     save_dpi();
     save_burst();
     save_axis_scales();
@@ -364,9 +400,23 @@ static void persist_all(void) {
  * should not mean five flash writes, and the key path should never block on
  * one.
  */
+/* DPI tuning only needs its own settings entry. */
+static atomic_t persist_all_pending = ATOMIC_INIT(0);
+static atomic_t tuning_dirty = ATOMIC_INIT(0);
+
 static void persist_work_cb(struct k_work *work) {
     ARG_UNUSED(work);
-    persist_all();
+    atomic_val_t dirty = atomic_set(&tuning_dirty, 0);
+    if (atomic_set(&persist_all_pending, 0)) {
+        persist_all();
+    } else {
+        save_dpi();
+        if (dirty & BIT(0)) save_burst();
+        if (dirty & BIT(1)) save_axis_scales();
+        if (dirty & BIT(2)) save_accel();
+        if (dirty & BIT(3)) save_scroll();
+        if (dirty & BIT(4)) save_mode_keys();
+    }
 }
 
 static K_WORK_DELAYABLE_DEFINE(trackpoint_persist_work, persist_work_cb);
@@ -415,7 +465,21 @@ static void raise_dpi_changed(void) {
     });
 }
 
+static void mark_dpi_changed(void) {
+    k_work_reschedule(&trackpoint_persist_work,
+                      K_MSEC(CONFIG_ZITAOTECH_TRACKPOINT_SAVE_DEBOUNCE_MS));
+    if (!atomic_get(&notify_suppressed)) {
+        zitaotech_trackpoint_state_changed();
+    }
+}
+
+static void mark_tuning_changed(uint8_t group) {
+    atomic_or(&tuning_dirty, BIT(group));
+    mark_dpi_changed();
+}
+
 static void mark_changed(void) {
+    atomic_set(&persist_all_pending, 1);
     k_work_reschedule(&trackpoint_persist_work,
                       K_MSEC(CONFIG_ZITAOTECH_TRACKPOINT_SAVE_DEBOUNCE_MS));
     if (!atomic_get(&notify_suppressed)) {
@@ -463,6 +527,7 @@ ZMK_SUBSCRIPTION(zitaotech_trackpoint_mirror_apply, zitaotech_trackpoint_mirror)
  * ------------------------------------------------------------------------ */
 
 int zitaotech_trackpoint_set_dpi_index(uint32_t index) {
+    if (zmk_pointing_profile_begin) zmk_pointing_profile_begin();
     uint32_t clamped = clamp_dpi_index((int32_t)index);
     uint32_t previous = zitaotech_trackpoint_dpi_index();
 
@@ -472,9 +537,9 @@ int zitaotech_trackpoint_set_dpi_index(uint32_t index) {
     }
 
     raise_mirror();
-    mark_changed();
+    mark_dpi_changed();
 
-    return (int)clamped;
+    { if (zmk_pointing_profile_end) zmk_pointing_profile_end(); return (int)clamped; }
 }
 
 int zitaotech_trackpoint_step_dpi(int delta) {
@@ -482,13 +547,14 @@ int zitaotech_trackpoint_step_dpi(int delta) {
 }
 
 int zitaotech_trackpoint_set_burst(bool enabled, uint32_t multiplier) {
+    if (zmk_pointing_profile_begin) zmk_pointing_profile_begin();
     atomic_set(&burst_enabled, enabled ? 1 : 0);
     atomic_set(&burst_multiplier, (atomic_val_t)clamp_multiplier((int32_t)multiplier));
 
     raise_mirror();
-    mark_changed();
+    mark_tuning_changed(0);
 
-    return 0;
+    { if (zmk_pointing_profile_end) zmk_pointing_profile_end(); return 0; }
 }
 
 int zitaotech_trackpoint_set_axis_scales(
@@ -506,7 +572,7 @@ int zitaotech_trackpoint_set_axis_scales(
         atomic_set(&axis_scales[i], (atomic_val_t)clamped);
     }
 
-    mark_changed();
+    mark_tuning_changed(1);
     return 0;
 }
 
@@ -514,7 +580,7 @@ int zitaotech_trackpoint_reset_axis_scales(void) {
     for (int i = 0; i < ZITAOTECH_TRACKPOINT_AXIS_COUNT; i++) {
         atomic_set(&axis_scales[i], CONFIG_ZITAOTECH_TRACKPOINT_AXIS_MIN);
     }
-    mark_changed();
+    mark_tuning_changed(1);
     return 0;
 }
 
@@ -525,7 +591,7 @@ int zitaotech_trackpoint_set_accel(uint32_t value) {
     }
 
     atomic_set(&accel, (atomic_val_t)value);
-    mark_changed();
+    mark_tuning_changed(2);
     return 0;
 }
 
@@ -543,7 +609,7 @@ int zitaotech_trackpoint_set_scroll(uint32_t speed_percent, bool burst_enabled,
     atomic_set(&scroll_burst_enabled, burst_enabled ? 1 : 0);
     atomic_set(&scroll_burst_multiplier, (atomic_val_t)burst_multiplier);
     atomic_set(&scroll_accel, (atomic_val_t)accel_value);
-    mark_changed();
+    mark_tuning_changed(3);
     return 0;
 }
 
@@ -571,7 +637,7 @@ int zitaotech_trackpoint_set_mode_key(enum zitaotech_trackpoint_mode mode, int32
     }
 
     atomic_set(&mode_key_positions[mode], (atomic_val_t)position);
-    if (position < 0) {
+    if (position < 0 || mode == ZITAOTECH_TRACKPOINT_MODE_FAST_SCROLL) {
         atomic_and(&mode_key_pressed_mask, (atomic_val_t)~(uint32_t)BIT(mode));
     }
     mark_changed();
@@ -586,7 +652,7 @@ int zitaotech_trackpoint_set_arrow_swipe_threshold(uint32_t threshold) {
     atomic_set(&arrow_swipe_threshold, (atomic_val_t)threshold);
     /* Mirror it: the arrow-mode gesture is evaluated on the peripheral. */
     raise_mirror();
-    mark_changed();
+    mark_tuning_changed(4);
     return 0;
 }
 
@@ -607,6 +673,9 @@ int zitaotech_trackpoint_set_smooth_scroll(bool enabled) {
 }
 
 int zitaotech_trackpoint_reset(void) {
+#if IS_ENABLED(CONFIG_ZITAOTECH_TRACKPOINT_VELOCITY_CURVE)
+    zitaotech_pointer_curve_reset();
+#endif
     atomic_set(&scroll_capslock_enabled, 0);
     atomic_set(&scroll_invert_x, 0);
     atomic_set(&scroll_invert_y, 0);

@@ -48,6 +48,8 @@ zmk_keymap_layers_state_t zmk_keymap_layer_locks(void);
 bool zmk_keymap_layer_active(zmk_keymap_layer_id_t layer);
 bool zmk_keymap_layer_locked(zmk_keymap_layer_id_t layer);
 zmk_keymap_layer_index_t zmk_keymap_highest_layer_active(void);
+/* Layer currently used first for key lookup, for display only. */
+zmk_keymap_layer_index_t zmk_keymap_display_layer_index(void);
 int zmk_keymap_layer_activate(zmk_keymap_layer_id_t layer, bool locking);
 int zmk_keymap_layer_deactivate(zmk_keymap_layer_id_t layer, bool locking);
 int zmk_keymap_layer_toggle(zmk_keymap_layer_id_t layer, bool locking);

@@ -1,0 +1,13 @@
+boards:
+  - name: zitaotech_keypoint_left
+    vendor: zitaotech
+    socs:
+      - name: nrf52840
+        variants:
+          - name: zmk
+  - name: zitaotech_keypoint_right
+    vendor: zitaotech
+    socs:
+      - name: nrf52840
+        variants:
+          - name: zmk

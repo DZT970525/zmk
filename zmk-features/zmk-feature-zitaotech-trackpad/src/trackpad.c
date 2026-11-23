@@ -1,3 +1,4 @@
+#include <zmk/pointing_profiles.h>
 /*
  * ZitaoTech trackpad runtime settings.
  *
@@ -39,32 +40,31 @@ LOG_MODULE_REGISTER(zitaotech_trackpad, CONFIG_ZMK_LOG_LEVEL);
 
 /*
  * Set when a normal key was pressed while the mouse layer was up.  The layer
- * stays down until the touch ends (no pointer event for the touch time), so
- * holding a mouse button and then typing does not bounce straight back into
- * the mouse layer.
+ * stays down for the key grace period, so typing does not immediately bounce
+ * back into the mouse layer when the pointing device is still active.
  */
 static atomic_t mouse_layer_blocked = ATOMIC_INIT(0);
 
 /*
- * How long a normal key keeps the mouse layer away.  Long enough that typing
- * does not fall back into the mouse layer between keystrokes, short enough
- * that the layer is usable again while the hand stays on the pointing device.
+ * After a normal key exits the mouse layer, allow new pointer events to
+ * reactivate it after 200 ms. Pointer events must not extend this deadline.
  */
-#define MOUSE_LAYER_KEY_GRACE_MS 1000
+#define MOUSE_LAYER_KEY_GRACE_MS 200
 
 /* Drop the automatic mouse layer without waiting for the touch to end. */
 static void mouse_layer_drop_work_cb(struct k_work *work) {
     ARG_UNUSED(work);
 
-    if (zmk_keymap_layer_active(CONFIG_ZITAOTECH_TRACKPAD_MOUSE_LAYER)) {
+    uint8_t layer_id = zmk_keymap_layer_index_to_id(CONFIG_ZITAOTECH_TRACKPAD_MOUSE_LAYER);
+    if (zmk_keymap_layer_active(layer_id)) {
         /* ZMK main added a second `locking` argument to the layer API. */
-        zmk_keymap_layer_deactivate(CONFIG_ZITAOTECH_TRACKPAD_MOUSE_LAYER, false);
+        zmk_keymap_layer_deactivate(layer_id, false);
     }
 }
 
 static K_WORK_DEFINE(mouse_layer_drop_work, mouse_layer_drop_work_cb);
 
-/* The finger has left the pad: the layer is allowed back in. */
+/* The key grace period expired: pointer events may activate the layer again. */
 static void mouse_layer_unblock_work_cb(struct k_work *work) {
     ARG_UNUSED(work);
     atomic_set(&mouse_layer_blocked, 0);
@@ -106,7 +106,7 @@ static atomic_t burst_enabled = ATOMIC_INIT(0);
 static atomic_t burst_multiplier = ATOMIC_INIT(1);
 static atomic_t scroll_burst_enabled = ATOMIC_INIT(0);
 static atomic_t scroll_burst_multiplier = ATOMIC_INIT(1);
-static atomic_t smooth_scroll_enabled = ATOMIC_INIT(0);
+static atomic_t smooth_scroll_enabled = ATOMIC_INIT(IS_ENABLED(CONFIG_ZITAOTECH_TRACKPAD_SMOOTH_SCROLL_DEFAULT));
 /* Caps Lock scrolls on the stock Q10; this is on unless Studio turns it off. */
 static atomic_t caps_lock_scroll_enabled = ATOMIC_INIT(1);
 /* Automatic mouse layer: off unless the board asks for it (the Q20 does),
@@ -132,7 +132,7 @@ static atomic_t mode_switch_enabled = ATOMIC_INIT(0);
     {                                                                                              \
         CONFIG_ZITAOTECH_TRACKPAD_ARROW_KEY_POSITION, CONFIG_ZITAOTECH_TRACKPAD_FAST_KEY_POSITION, \
             CONFIG_ZITAOTECH_TRACKPAD_SLOW_KEY_POSITION,                                           \
-            CONFIG_ZITAOTECH_TRACKPAD_SCROLL_KEY_POSITION                                          \
+            CONFIG_ZITAOTECH_TRACKPAD_SCROLL_KEY_POSITION, -1                                      \
     }
 
 static const char *const mode_key_setting_names[ZITAOTECH_TRACKPAD_KEY_COUNT] = {
@@ -140,6 +140,7 @@ static const char *const mode_key_setting_names[ZITAOTECH_TRACKPAD_KEY_COUNT] = 
     "fastkey",
     "slowkey",
     "scrollkey",
+    "fastscrollkey",
 };
 
 static atomic_t mode_key_positions[ZITAOTECH_TRACKPAD_KEY_COUNT];
@@ -276,9 +277,25 @@ static void persist_all(void) {
  * one. Every change also pushes a Studio notification so the web UI follows
  * along live.
  */
+/* DPI tuning only needs its own settings entry. */
+static atomic_t persist_all_pending = ATOMIC_INIT(0);
+static atomic_t tuning_dirty = ATOMIC_INIT(0);
+
 static void persist_work_cb(struct k_work *work) {
     ARG_UNUSED(work);
-    persist_all();
+    atomic_val_t dirty = atomic_set(&tuning_dirty, 0);
+    if (atomic_set(&persist_all_pending, 0)) {
+        persist_all();
+    } else {
+        save_dpi();
+        if (dirty & BIT(0)) save_burst();
+        if (dirty & BIT(1)) save_scroll_burst();
+        if (dirty & BIT(2)) save_speed();
+        if (dirty & BIT(3)) save_mouse_layer_ms();
+        if (dirty & BIT(4)) save_trackpoint_mouse_layer_ms();
+        if (dirty & BIT(5)) save_touch_on_ms();
+        if (dirty & BIT(6)) save_arrow_swipe();
+    }
 }
 
 K_WORK_DELAYABLE_DEFINE(persist_work, persist_work_cb);
@@ -320,7 +337,20 @@ static void mode_persist_work_handler(struct k_work *work) {
 
 K_WORK_DELAYABLE_DEFINE(mode_persist_work, mode_persist_work_handler);
 
+static void mark_dpi_changed(void) {
+    k_work_reschedule(&persist_work, K_MSEC(CONFIG_ZITAOTECH_TRACKPAD_SAVE_DEBOUNCE_MS));
+    if (!atomic_get(&notify_suppressed)) {
+        k_work_submit(&notify_work);
+    }
+}
+
+static void mark_tuning_changed(uint8_t group) {
+    atomic_or(&tuning_dirty, BIT(group));
+    mark_dpi_changed();
+}
+
 static void mark_changed(void) {
+    atomic_set(&persist_all_pending, 1);
     k_work_reschedule(&persist_work, K_MSEC(CONFIG_ZITAOTECH_TRACKPAD_SAVE_DEBOUNCE_MS));
     if (!atomic_get(&notify_suppressed)) {
         k_work_submit(&notify_work);
@@ -335,21 +365,23 @@ static void raise_dpi_changed(void) {
 }
 
 int zitaotech_trackpad_set_dpi_index(uint32_t index) {
+    if (zmk_pointing_profile_begin) zmk_pointing_profile_begin();
     if (index >= ZITAOTECH_TRACKPAD_DPI_LEVELS) {
-        return -EINVAL;
+        { if (zmk_pointing_profile_end) zmk_pointing_profile_end(); return -EINVAL; }
     }
     atomic_set(&dpi_index, (atomic_val_t)index);
-    mark_changed();
+    mark_dpi_changed();
     raise_dpi_changed();
-    return 0;
+    { if (zmk_pointing_profile_end) zmk_pointing_profile_end(); return 0; }
 }
 
 int zitaotech_trackpad_step_dpi(int delta) {
+    if (zmk_pointing_profile_begin) zmk_pointing_profile_begin();
     uint32_t next = clamp_dpi_index((int32_t)zitaotech_trackpad_dpi_index() + delta * (10 / DPI_STEP));
     atomic_set(&dpi_index, (atomic_val_t)next);
-    mark_changed();
+    mark_dpi_changed();
     raise_dpi_changed();
-    return (int)next;
+    { if (zmk_pointing_profile_end) zmk_pointing_profile_end(); return (int)next; }
 }
 
 bool zitaotech_trackpad_burst_enabled(void) { return atomic_get(&burst_enabled) != 0; }
@@ -363,13 +395,14 @@ uint32_t zitaotech_trackpad_pointer_multiplier(void) {
 }
 
 int zitaotech_trackpad_set_burst(bool enabled, uint32_t multiplier) {
+    if (zmk_pointing_profile_begin) zmk_pointing_profile_begin();
     if (multiplier < 1 || multiplier > CONFIG_ZITAOTECH_TRACKPAD_BURST_MAX) {
-        return -EINVAL;
+        { if (zmk_pointing_profile_end) zmk_pointing_profile_end(); return -EINVAL; }
     }
     atomic_set(&burst_enabled, enabled ? 1 : 0);
     atomic_set(&burst_multiplier, (atomic_val_t)multiplier);
-    mark_changed();
-    return 0;
+    mark_tuning_changed(0);
+    { if (zmk_pointing_profile_end) zmk_pointing_profile_end(); return 0; }
 }
 
 bool zitaotech_trackpad_scroll_burst_enabled(void) {
@@ -391,7 +424,7 @@ int zitaotech_trackpad_set_scroll_burst(bool enabled, uint32_t multiplier) {
     }
     atomic_set(&scroll_burst_enabled, enabled ? 1 : 0);
     atomic_set(&scroll_burst_multiplier, (atomic_val_t)multiplier);
-    mark_changed();
+    mark_tuning_changed(1);
     return 0;
 }
 
@@ -457,7 +490,7 @@ static uint32_t clamp_mouse_layer_ms(uint32_t ms) {
 
 int zitaotech_trackpad_set_mouse_layer_ms(uint32_t ms) {
     atomic_set(&mouse_layer_ms, (atomic_val_t)clamp_mouse_layer_ms(ms));
-    mark_changed();
+    mark_tuning_changed(3);
     return 0;
 }
 
@@ -477,7 +510,7 @@ uint32_t zitaotech_trackpad_trackpoint_mouse_layer_ms(void) {
 
 int zitaotech_trackpad_set_trackpoint_mouse_layer_ms(uint32_t ms) {
     atomic_set(&trackpoint_mouse_layer_ms, (atomic_val_t)clamp_mouse_layer_ms(ms));
-    mark_changed();
+    mark_tuning_changed(4);
     return 0;
 }
 
@@ -491,7 +524,7 @@ int zitaotech_trackpad_set_touch_on_ms(uint32_t ms) {
     }
     atomic_set(&touch_on_ms, (atomic_val_t)ms);
     /* The trackpad LED reads the value when it schedules its own timeout. */
-    mark_changed();
+    mark_tuning_changed(5);
     return 0;
 }
 
@@ -506,7 +539,21 @@ int zitaotech_trackpad_set_touch_on_ms(uint32_t ms) {
 #define TEMP_LAYER_TRACKPAD_DEV DEVICE_DT_GET(DT_COMPAT_GET_ANY_STATUS_OKAY(avago_a320))
 
 static bool temp_layer_source_is_trackpad(const struct device *dev) {
+#if IS_ENABLED(CONFIG_SOFLE_MODULAR_POINTING) && DT_NODE_HAS_STATUS(DT_NODELABEL(bbtrackpad_split), okay)
+    if (dev == DEVICE_DT_GET(DT_NODELABEL(bbtrackpad_split))) return true;
+#endif
+#if IS_ENABLED(CONFIG_SOFLE_MODULAR_POINTING) && DT_NODE_HAS_STATUS(DT_NODELABEL(right_trackpad_split), okay)
+    if (dev == DEVICE_DT_GET(DT_NODELABEL(right_trackpad_split))) return true;
+#endif
+    #if IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE_LEFT)
+    return dev == TEMP_LAYER_TRACKPAD_DEV || dev == DEVICE_DT_GET(DT_NODELABEL(bbtrackpad_split));
+#else
     return dev == TEMP_LAYER_TRACKPAD_DEV;
+#endif
+}
+#elif (defined(CONFIG_BOARD_KEYPOINT_DONGLE) || defined(CONFIG_BOARD_SOFLE_DONGLE))
+static bool temp_layer_source_is_trackpad(const struct device *dev) {
+    return dev == DEVICE_DT_GET(DT_NODELABEL(bbtrackpad_split));
 }
 #else
 static bool temp_layer_source_is_trackpad(const struct device *dev) {
@@ -542,7 +589,7 @@ static void note_mouse_layer_source(bool from_trackpad) {
         return;
     }
 
-    if (zmk_keymap_layer_active(CONFIG_ZITAOTECH_TRACKPAD_MOUSE_LAYER)) {
+    if (zmk_keymap_layer_active(zmk_keymap_layer_index_to_id(CONFIG_ZITAOTECH_TRACKPAD_MOUSE_LAYER))) {
         raise_zitaotech_trackpad_mouse_layer_source_changed(
             (struct zitaotech_trackpad_mouse_layer_source_changed){
                 .from_trackpad = from_trackpad,
@@ -574,7 +621,8 @@ bool zmk_input_processor_temp_layer_enabled(const struct device *dev, uint32_t l
     }
 
     /*
-     * Only from the base layer: the mouse buttons are meant to be used while
+     * Legacy base-only policy, retained on boards without the all-layers option:
+     * the mouse buttons are meant to be used while
      * typing on layer 0, and the overlay must not sit on top of the symbol,
      * navigation or media layers while the user holds one of them.  The mouse
      * layer itself may of course stay active once it is up.
@@ -582,11 +630,13 @@ bool zmk_input_processor_temp_layer_enabled(const struct device *dev, uint32_t l
      * ZMK does not store the default layer in the state bitmask (it is always
      * active), so add it back before comparing.
      */
-    zmk_keymap_layers_state_t base = BIT(zmk_keymap_layer_default());
-    zmk_keymap_layers_state_t active = zmk_keymap_layer_state() | base;
-
-    if ((active & ~BIT(CONFIG_ZITAOTECH_TRACKPAD_MOUSE_LAYER)) != base) {
-        return false;
+    if (!zmk_input_processor_temp_layer_overlay_enabled()) {
+        zmk_keymap_layers_state_t base = BIT(zmk_keymap_layer_default());
+        zmk_keymap_layers_state_t active = zmk_keymap_layer_state() | base;
+        uint8_t mouse_id = zmk_keymap_layer_index_to_id(CONFIG_ZITAOTECH_TRACKPAD_MOUSE_LAYER);
+        if ((active & ~BIT(mouse_id)) != base) {
+            return false;
+        }
     }
 
     /* This event is allowed to raise or hold the layer, so it is the current
@@ -607,13 +657,15 @@ uint32_t zmk_input_processor_temp_layer_timeout_ms(const struct device *dev, uin
 /*
  * Going back to typing leaves the mouse layer.  Mouse buttons never produce a
  * keycode - &mkp drives the HID mouse report directly - so "a keycode arrived"
- * is exactly "the user pressed something that is not a mouse button": Caps
- * Lock, a modifier, a letter, a media key, ...
+ * normally indicates typing. Encoder-generated keyboard/media keycodes are
+ * excluded: using a mouse-layer rotary binding must not dismiss that layer.
  */
+__weak bool zmk_keypoint_mouse_layer_exit_on_key_enabled(void) { return true; }
 static int mouse_layer_key_listener(const zmk_event_t *eh) {
+    if (!zmk_keypoint_mouse_layer_exit_on_key_enabled()) return ZMK_EV_EVENT_BUBBLE;
     const struct zmk_keycode_state_changed *ev = as_zmk_keycode_state_changed(eh);
 
-    if (ev == NULL || !ev->state) {
+    if (ev == NULL || !ev->state || ev->from_sensor) {
         return ZMK_EV_EVENT_BUBBLE;
     }
 
@@ -634,7 +686,7 @@ static int mouse_layer_key_listener(const zmk_event_t *eh) {
     }
 
     if (!zitaotech_trackpad_mouse_layer_enabled() ||
-        !zmk_keymap_layer_active(CONFIG_ZITAOTECH_TRACKPAD_MOUSE_LAYER)) {
+        !zmk_keymap_layer_active(zmk_keymap_layer_index_to_id(CONFIG_ZITAOTECH_TRACKPAD_MOUSE_LAYER))) {
         return ZMK_EV_EVENT_BUBBLE;
     }
 
@@ -670,7 +722,7 @@ int zitaotech_trackpad_set_arrow_swipe_threshold(uint32_t threshold) {
         return -EINVAL;
     }
     atomic_set(&arrow_swipe_threshold, (atomic_val_t)threshold);
-    mark_changed();
+    mark_tuning_changed(6);
     return 0;
 }
 
@@ -738,6 +790,10 @@ int32_t zitaotech_trackpad_slow_key_position(void) {
     return mode_key_get(ZITAOTECH_TRACKPAD_KEY_SLOW);
 }
 
+int32_t zitaotech_trackpad_fast_scroll_key_position(void) {
+    return mode_key_get(ZITAOTECH_TRACKPAD_KEY_FAST_SCROLL);
+}
+
 int32_t zitaotech_trackpad_scroll_key_position(void) {
     return mode_key_get(ZITAOTECH_TRACKPAD_KEY_SCROLL);
 }
@@ -787,7 +843,7 @@ int zitaotech_trackpad_set_scroll_speed_percent(uint32_t percent) {
         return -EINVAL;
     }
     atomic_set(&scroll_speed_percent, (atomic_val_t)percent);
-    mark_changed();
+    mark_tuning_changed(2);
     return 0;
 }
 
@@ -820,7 +876,7 @@ int zitaotech_trackpad_reset(void) {
     atomic_set(&burst_multiplier, 1);
     atomic_set(&scroll_burst_enabled, 0);
     atomic_set(&scroll_burst_multiplier, 1);
-    atomic_set(&smooth_scroll_enabled, 0);
+    atomic_set(&smooth_scroll_enabled, IS_ENABLED(CONFIG_ZITAOTECH_TRACKPAD_SMOOTH_SCROLL_DEFAULT));
     atomic_set(&caps_lock_scroll_enabled, 1);
     atomic_set(&mouse_layer_enabled, MOUSE_LAYER_DEFAULT_ON);
     atomic_set(&mouse_layer_ms, CONFIG_ZITAOTECH_TRACKPAD_MOUSE_LAYER_MS);
@@ -1121,7 +1177,8 @@ SETTINGS_STATIC_HANDLER_DEFINE(zitaotech_trackpad, SETTINGS_PREFIX, NULL, trackp
 
 /*
  * ---------------------------------------------------------------------------
- * Caps Lock for hosts that never report it.
+ * Caps Lock for hosts that never report it. Q20 deliberately excludes this
+ * fallback: its indicators must come from the connected host only.
  *
  * Caps Lock scroll mode - and the trackpad LED - follow the host's LED report,
  * which is the only way to know the real lock state.  Plenty of hosts simply
@@ -1138,7 +1195,9 @@ SETTINGS_STATIC_HANDLER_DEFINE(zitaotech_trackpad, SETTINGS_PREFIX, NULL, trackp
  * because our key press is what toggled it.
  * ------------------------------------------------------------------------
  */
-#if IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
+#if IS_ENABLED(CONFIG_ZMK_HID_INDICATORS) && !IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q20) && \
+    !IS_ENABLED(CONFIG_ZITAOTECH_Q10_HOST_CAPS_ONLY) && \
+    (!IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL))
 
 /* Same layout as the board drivers and the HID spec: bit 1 is Caps Lock. */
 #define HID_INDICATORS_CAPS_LOCK (1 << 1)
@@ -1179,3 +1238,127 @@ static int zitaotech_trackpad_init(void) {
 }
 
 SYS_INIT(zitaotech_trackpad_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
+
+/* Peripheral gestures are emitted by the central endpoint. */
+struct zitaotech_trackpad_arrow_tap { uint16_t usage; uint8_t source; };
+ZMK_EVENT_DECLARE(zitaotech_trackpad_arrow_tap);
+ZMK_EVENT_IMPL(zitaotech_trackpad_arrow_tap);
+ZMK_RELAY_EVENT_PERIPHERAL_TO_CENTRAL(zitaotech_trackpad_arrow_tap, tpa, source);
+ZMK_RELAY_EVENT_HANDLE(zitaotech_trackpad_arrow_tap, tpa, source);
+void zitaotech_trackpad_relay_arrow_tap(uint16_t usage) {
+    raise_zitaotech_trackpad_arrow_tap((struct zitaotech_trackpad_arrow_tap){
+        .usage = usage, .source = ZMK_RELAY_EVENT_SOURCE_SELF});
+}
+#if (IS_ENABLED(CONFIG_BOARD_KEYPOINT_DONGLE) || IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE)) || IS_ENABLED(CONFIG_ZMK_SPLIT_RUNTIME_ROLE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN) || IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE_LEFT) || IS_ENABLED(CONFIG_BOARD_KEYPOINT_DONGLE_LEFT)
+#include <dt-bindings/zmk/keys.h>
+#include <dt-bindings/zmk/modifiers.h>
+static void central_arrow_tap(uint16_t usage) {
+    if (zmk_hid_keyboard_is_pressed(usage)) {
+        return;
+    }
+
+    struct zmk_hid_keyboard_report *report = zmk_hid_get_keyboard_report();
+    zmk_mod_flags_t saved_mods = report->body.modifiers;
+    int ret = zmk_hid_keyboard_press(usage);
+    if (ret < 0) {
+        return;
+    }
+
+    report->body.modifiers = saved_mods & ~(MOD_LSFT | MOD_RSFT);
+    int press_err = zmk_endpoint_send_report(HID_USAGE_KEY);
+    zmk_hid_keyboard_release(usage);
+    int release_err = zmk_endpoint_send_report(HID_USAGE_KEY);
+    report->body.modifiers = saved_mods;
+
+    if (saved_mods & (MOD_LSFT | MOD_RSFT)) {
+        zmk_endpoint_send_report(HID_USAGE_KEY);
+    }
+    if (press_err < 0 || release_err < 0) {
+        LOG_DBG("Arrow report failed: press=%d release=%d", press_err, release_err);
+    }
+}
+
+K_MSGQ_DEFINE(remote_arrow_taps, sizeof(uint16_t), 8, 2);
+static void remote_arrow_work_cb(struct k_work *work) {
+    uint16_t usage;
+    while (k_msgq_get(&remote_arrow_taps, &usage, K_NO_WAIT) == 0) central_arrow_tap(usage);
+}
+K_WORK_DEFINE(remote_arrow_work, remote_arrow_work_cb);
+static int remote_arrow_listener(const zmk_event_t *eh) {
+    const struct zitaotech_trackpad_arrow_tap *ev = as_zitaotech_trackpad_arrow_tap(eh);
+    if (ev) {
+        if (k_msgq_put(&remote_arrow_taps, &ev->usage, K_NO_WAIT) == 0) k_work_submit(&remote_arrow_work);
+    }
+    return ZMK_EV_EVENT_BUBBLE;
+}
+ZMK_LISTENER(zitaotech_remote_arrow, remote_arrow_listener);
+ZMK_SUBSCRIPTION(zitaotech_remote_arrow, zitaotech_trackpad_arrow_tap);
+#endif
+
+/* Dongle owns DPI. The peripheral mirror is for LED feedback only: no flash writes. */
+#if (IS_ENABLED(CONFIG_BOARD_KEYPOINT_DONGLE) || IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE)) || (IS_ENABLED(CONFIG_BOARD_KEYPOINT_DONGLE_LEFT) || IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE_LEFT))
+struct zitaotech_trackpad_led_dpi { uint8_t index; uint8_t request; uint8_t source; };
+ZMK_EVENT_DECLARE(zitaotech_trackpad_led_dpi);
+ZMK_EVENT_IMPL(zitaotech_trackpad_led_dpi);
+ZMK_RELAY_EVENT_CENTRAL_TO_PERIPHERAL(zitaotech_trackpad_led_dpi, tld, source);
+ZMK_RELAY_EVENT_PERIPHERAL_TO_CENTRAL(zitaotech_trackpad_led_dpi, tld, source);
+ZMK_RELAY_EVENT_HANDLE(zitaotech_trackpad_led_dpi, tld, source);
+
+#if (IS_ENABLED(CONFIG_BOARD_KEYPOINT_DONGLE) || IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE))
+static void led_dpi_send_work_cb(struct k_work *work) {
+    ARG_UNUSED(work);
+    raise_zitaotech_trackpad_led_dpi((struct zitaotech_trackpad_led_dpi){
+        .index = zitaotech_trackpad_dpi_index(), .source = ZMK_RELAY_EVENT_SOURCE_SELF});
+}
+K_WORK_DELAYABLE_DEFINE(led_dpi_send_work, led_dpi_send_work_cb);
+static int led_dpi_changed_listener(const zmk_event_t *eh) {
+    if (as_zitaotech_trackpad_dpi_changed(eh)) k_work_reschedule(&led_dpi_send_work, K_MSEC(30));
+    return ZMK_EV_EVENT_BUBBLE;
+}
+ZMK_LISTENER(dongle_led_dpi_changed, led_dpi_changed_listener);
+ZMK_SUBSCRIPTION(dongle_led_dpi_changed, zitaotech_trackpad_dpi_changed);
+#else
+#include <zmk/events/split_peripheral_status_changed.h>
+extern void indicator_tp_dpi_changed(void) __attribute__((weak));
+static atomic_t led_dpi_received;
+static uint8_t led_dpi_attempts;
+static void led_dpi_request_work_cb(struct k_work *work);
+K_WORK_DELAYABLE_DEFINE(led_dpi_request_work, led_dpi_request_work_cb);
+static void led_dpi_request_work_cb(struct k_work *work) {
+    ARG_UNUSED(work);
+    if (atomic_get(&led_dpi_received) || led_dpi_attempts >= 10) return;
+    led_dpi_attempts++;
+    raise_zitaotech_trackpad_led_dpi((struct zitaotech_trackpad_led_dpi){
+        .request = 1, .source = ZMK_RELAY_EVENT_SOURCE_SELF});
+    k_work_reschedule(&led_dpi_request_work, K_MSEC(500));
+}
+static int led_dpi_connection_listener(const zmk_event_t *eh) {
+    const struct zmk_split_peripheral_status_changed *ev = as_zmk_split_peripheral_status_changed(eh);
+    if (ev) {
+        atomic_set(&led_dpi_received, 0);
+        led_dpi_attempts = 0;
+        if (ev->connected) k_work_reschedule(&led_dpi_request_work, K_MSEC(500));
+        else k_work_cancel_delayable(&led_dpi_request_work);
+    }
+    return ZMK_EV_EVENT_BUBBLE;
+}
+ZMK_LISTENER(dongle_led_dpi_connection, led_dpi_connection_listener);
+ZMK_SUBSCRIPTION(dongle_led_dpi_connection, zmk_split_peripheral_status_changed);
+#endif
+static int led_dpi_apply_listener(const zmk_event_t *eh) {
+    const struct zitaotech_trackpad_led_dpi *ev = as_zitaotech_trackpad_led_dpi(eh);
+    if (!ev || ev->source == ZMK_RELAY_EVENT_SOURCE_SELF) return ZMK_EV_EVENT_BUBBLE;
+#if (IS_ENABLED(CONFIG_BOARD_KEYPOINT_DONGLE) || IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE))
+    if (ev->request) k_work_reschedule(&led_dpi_send_work, K_NO_WAIT);
+#else
+    if (!ev->request && ev->index < ZITAOTECH_TRACKPAD_DPI_LEVELS) {
+        atomic_set(&dpi_index, ev->index);
+        atomic_set(&led_dpi_received, 1);
+        if (indicator_tp_dpi_changed) indicator_tp_dpi_changed();
+    }
+#endif
+    return ZMK_EV_EVENT_BUBBLE;
+}
+ZMK_LISTENER(dongle_led_dpi_apply, led_dpi_apply_listener);
+ZMK_SUBSCRIPTION(dongle_led_dpi_apply, zitaotech_trackpad_led_dpi);
+#endif

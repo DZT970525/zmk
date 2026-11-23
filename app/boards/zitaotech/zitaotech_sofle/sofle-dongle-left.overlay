@@ -1,0 +1,20 @@
+&zip_temp_layer { status = "okay"; };
+/ { input_processors { dongle_trackpad: dongle_trackpad {
+    compatible = "zmk,input-processor-dongle-trackpad";
+    #input-processor-cells = <0>;
+}; }; };
+&bbtrackpad_listener {
+    status = "okay";
+    device = <&bbtrackpad_split>;
+    input-processors = <&zip_temp_layer 3 600>, <&dongle_trackpad>,
+        <&ip_behaviors0>, <&ip_behaviors1>, <&ip_behaviors2>, <&ip_behaviors3>;
+};
+&trackpoint_split { status = "okay"; };
+&trackpoint_listener {
+    status = "okay";
+    device = <&trackpoint_split>;
+    input-processors = <&zip_temp_layer 3 600>, <&trackpoint_dpi_scaler>,
+        <&ip_behaviors0>, <&ip_behaviors1>, <&ip_behaviors2>, <&ip_behaviors3>;
+};
+&bbtrackball_listener { status = "disabled"; };
+&bbtrackball_split { status = "disabled"; };

@@ -16,6 +16,8 @@ struct zmk_keycode_state_changed {
     uint8_t implicit_modifiers;
     uint8_t explicit_modifiers;
     bool state;
+    /* Encoder-generated keycodes are not physical typing activity. */
+    bool from_sensor;
     int64_t timestamp;
 };
 

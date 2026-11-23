@@ -6,6 +6,9 @@
 #include <zmk/screen_usb.h>
 #include "screen_transfer.h"
 #include "screen_image_store.h"
+#if (IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN))
+#include "area_pictures.h"
+#endif
 
 /* USB image v1, independent of Studio protobuf data packets:
  * A5 5A 01 op token slot format 00 offset:u16 total:u16 length:u16
@@ -22,7 +25,7 @@ static bool rpc_frame, rpc_escape;
 static struct k_spinlock parser_lock, status_lock;
 static atomic_t active, overflow;
 static struct zitaotech_usb_image_status status;
-static uint8_t image[4320];
+static uint8_t *image;
 
 bool zitaotech_usb_image_active(void) { return atomic_get(&active); }
 void zitaotech_usb_image_status(struct zitaotech_usb_image_status *out) {
@@ -71,6 +74,7 @@ static void usb_image_thread(void *a, void *b, void *c) {
             k_spin_unlock(&parser_lock,key);
             if ((atomic_get(&active) && k_uptime_get()-activity>10000) || atomic_get(&overflow)) {
                 atomic_clear(&overflow); atomic_clear(&active);
+                zitaotech_screen_image_upload_end(2);
                 value.active=false; value.error=-ETIMEDOUT; publish(value);
             }
             continue;
@@ -81,11 +85,13 @@ static void usb_image_thread(void *a, void *b, void *c) {
         if (crc32_ieee(p,USB_HEADER+len)!=sys_get_le32(p+USB_HEADER+len) || p[7]) error=-EBADMSG;
         else if (atomic_get(&overflow)) { atomic_clear(&overflow); error=-ENOBUFS; }
         else if (p[3]==1) {
-            if (len!=4 || offset || p[5]>1 || p[6]>1 || total!=(p[6] ? 1080 : 4320)) error=-EINVAL;
+            if (len!=4 || offset || (p[6]==3 ? p[5]>=10 : p[5]>=ZITAOTECH_SCREEN_IMAGE_SLOTS) || (p[6]>1 && !((IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN)) && p[6]==3)) || total!=(p[6]==3 ? 1372 : p[6] ? 1080 : 4320)) error=-EINVAL;
             else if (zitaotech_screen_transfer_active() || zitaotech_screen_rpc_upload_active()) error=-EBUSY;
             else {
                 value=(struct zitaotech_usb_image_status){.active=true,.token=p[4],.slot=p[5],.total=total,.crc=sys_get_le32(p+USB_HEADER)};
-                format=p[6]; atomic_set(&active,1);
+                image=zitaotech_screen_image_upload_buffer(2);
+                if (!image) error=-EBUSY;
+                format=p[6]; if (!error) atomic_set(&active,1);
             }
         } else if (p[3]==3 && value.stored && p[4]==value.token && p[5]==value.slot &&
                    p[6]==format && total==value.total && offset==total && !len) {
@@ -98,11 +104,19 @@ static void usb_image_thread(void *a, void *b, void *c) {
             else if (offset+len>value.received || memcmp(image+offset,p+USB_HEADER,len)) error=-EBADMSG;
         } else if (p[3]==3) {
             if (len || offset!=total || value.received!=total || crc32_ieee(image,total)!=value.crc) error=-EBADMSG;
-            else { error=zitaotech_screen_image_write(value.slot,format,image,total); value.stored=!error; }
+            else {
+#if (IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN))
+                if(format==3)error=keypoint_area_picture_write(value.slot,image,total);
+                else
+#endif
+                error=zitaotech_screen_image_write(value.slot,format,image,total);
+                value.stored=!error;
+            }
             atomic_clear(&active);
         } else if (p[3]==4 && !len) atomic_clear(&active);
         else error=-EINVAL;
         if (error) { atomic_clear(&active); value.stored=false; }
+        if (!atomic_get(&active)) zitaotech_screen_image_upload_end(2);
         value.active=atomic_get(&active); value.op=p[3]; value.error=error;
         if (error) { value.token=p[4]; value.slot=p[5]; }
         activity=k_uptime_get(); publish(value);

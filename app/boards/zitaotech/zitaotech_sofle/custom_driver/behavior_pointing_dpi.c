@@ -88,12 +88,12 @@ static const struct behavior_parameter_value_metadata device_values[] = {
         .value = DPI_DEVICE_NONE,
     },
     {
-        .display_name = "Trackpad",
+        .display_name = IS_ENABLED(CONFIG_SOFLE_MODULAR_POINTING) ? "Left module" : "Trackpad",
         .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
         .value = DPI_DEVICE_TRACKPAD,
     },
     {
-        .display_name = "TrackPoint",
+        .display_name = IS_ENABLED(CONFIG_SOFLE_MODULAR_POINTING) ? "Right module" : "TrackPoint",
         .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
         .value = DPI_DEVICE_TRACKPOINT,
     },
@@ -134,6 +134,15 @@ static const struct behavior_parameter_metadata metadata = {
 static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
     ARG_UNUSED(event);
+#if IS_ENABLED(CONFIG_SOFLE_MODULAR_POINTING)
+    if (binding->param1 == DPI_DEVICE_TRACKPAD || binding->param1 == DPI_DEVICE_TRACKPOINT) {
+        if (binding->param2 == DPI_DIRECTION_NONE) return ZMK_BEHAVIOR_OPAQUE;
+        extern int sofle_modular_step_dpi(bool right, int delta);
+        sofle_modular_step_dpi(binding->param1 == DPI_DEVICE_TRACKPOINT,
+            binding->param2 == DPI_DIRECTION_DECREASE ? -1 : 1);
+        return ZMK_BEHAVIOR_OPAQUE;
+    }
+#endif
     atomic_val_t dpi = 0;
     atomic_t *dpi_value = NULL;
     atomic_val_t minimum = 0;

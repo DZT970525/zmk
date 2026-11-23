@@ -1,0 +1,148 @@
+# Copyright (c) 2025 ZitaoTech
+# SPDX-License-Identifier: MIT
+
+# SOC and board symbols come from board.yml / the build target in the new
+# board scheme; assigning them here is no longer allowed.
+
+
+# (ARM_MPU is selected automatically by the SoC in Zephyr 4.x.)
+
+
+
+
+# enable GPIO
+CONFIG_GPIO=y
+CONFIG_PINCTRL=y
+
+# Build Configuration
+# The bootloader (and the MBR before it) lives below 0x1000, so the image has
+# to be linked into /chosen/zephyr,code-partition.  Without this the firmware
+# is linked and flashed at 0x0 and the board does not boot at all.
+CONFIG_USE_DT_CODE_PARTITION=y
+CONFIG_BUILD_OUTPUT_UF2=y
+# &bootloader needs the retention boot mode (stores the bootloader request in
+# GPREGRET across the reset, exactly like nice_nano does).
+CONFIG_RETAINED_MEM=y
+CONFIG_RETENTION=y
+CONFIG_RETENTION_BOOT_MODE=y
+
+# Flash configuration
+CONFIG_MPU_ALLOW_FLASH_WRITE=y
+CONFIG_NVS=y
+CONFIG_SETTINGS_NVS=y
+CONFIG_FLASH=y
+CONFIG_FLASH_PAGE_LAYOUT=y
+CONFIG_FLASH_MAP=y
+
+# (BT TX power is a Kconfig choice; the default is fine.)
+
+# Sleep Setting
+CONFIG_ZMK_SLEEP=y
+CONFIG_PM_DEVICE=y
+CONFIG_ZMK_IDLE_SLEEP_TIMEOUT=1800000
+CONFIG_ZMK_EXT_POWER=y
+# Keyboard idle timeout in milliseconds
+CONFIG_ZMK_IDLE_TIMEOUT=5000
+
+CONFIG_ZMK_BACKLIGHT=n
+
+# HID indicator configuration
+CONFIG_ZMK_HID_INDICATORS=y
+
+# Enable pointing device driver
+CONFIG_ZMK_POINTING=y
+CONFIG_ZMK_MOUSE=y
+CONFIG_INPUT_THREAD_STACK_SIZE=2048
+# Debuncing Setting
+CONFIG_ZMK_KSCAN_DEBOUNCE_PRESS_MS=20
+CONFIG_ZMK_KSCAN_DEBOUNCE_RELEASE_MS=20
+
+# Enable both USB and BLE
+CONFIG_ZMK_USB=y
+CONFIG_ZMK_BLE=y
+# ZMK's split Kconfig selects the PHY / data-length update features and Zephyr
+# 4.x refuses a select whose own dependencies are unmet.
+CONFIG_BT_PHY_UPDATE=y
+CONFIG_BT_DATA_LEN_UPDATE=y
+
+# Milliseconds to wait after a setting change before writing it to flash memory
+CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE=1000
+
+# ZMK Studio
+CONFIG_ZMK_STUDIO=y
+CONFIG_ZMK_STUDIO_LOCKING=n
+CONFIG_ZMK_STUDIO_LOCK_ON_DISCONNECT=n
+
+# Runtime sensor rotate is a central-only feature: ZMK does not compile the
+# keymap / behaviour queue on the peripheral half, so the behaviour driver must
+# stay off here.  The keymap's &rsr_* nodes are inert on this half.
+CONFIG_ZMK_RUNTIME_SENSOR_ROTATE=n
+CONFIG_ZMK_RUNTIME_SENSOR_ROTATE_STUDIO_RPC=n
+
+# Split event relay (peripheral half). The central half's Studio reads this
+# half's watchdog history and kscan wiring through relayed queries, so the same
+# relay settings must be built into both images.
+# The ZitaoTech Studio extension modules (watchdog, kscan diagnostics, split
+# relay, settings RPC, ...) do not exist in this tree yet; each one comes back
+# with its module, one at a time.
+# Step 3: answer the central's relayed kscan diagnostics queries from this
+# half's own topology/stats tables (no Studio RPC of its own).
+# This half answers the central's relayed queries; it has no Studio RPC
+# transport of its own (CONFIG_ZMK_STUDIO_RPC is off), so the local custom
+# subsystem handler would only fail to find the generated custom proto.
+# Core activity settings (idle/sleep) reporting + applying. The peripheral has
+# no Studio RPC of its own, but this module's event side is what answers the
+# central's relayed "get all activity settings" request and applies relayed
+# changes, so the Settings tab can show and set this half's idle/sleep too.
+CONFIG_ZMK_SETTINGS_RPC=y
+CONFIG_ZMK_SETTINGS_RPC_STUDIO=n
+# The central writes relayed events to this half through the split service's
+# relay characteristic, so both halves have to agree on the payload limits.
+#
+# Those limits keep the payload inside a single ATT PDU: the split link never
+# exchanges MTUs, so the ATT MTU stays at the default 23 bytes and the
+# controller ACL buffer is 27 bytes, i.e. 20 payload bytes.
+CONFIG_ZMK_SPLIT_RELAY_EVENT=y
+CONFIG_ZMK_SPLIT_RELAY_EVENT_TYPE_NAME_LEN=4
+CONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN=12
+
+# TrackPoint pointer speed / burst mode.  This half does not scale the motion
+# (that happens on the central) but it does drive the TrackPoint LED, so it
+# keeps its own copy of the value, mirrored over the relay above.
+CONFIG_ZITAOTECH_TRACKPOINT_CONTROL=y
+CONFIG_ZITAOTECH_TRACKPOINT_CONTROL_STUDIO_RPC=n
+
+# QMK style bootmagic (see the left half): this half reads its own matrix, so
+# it can enter its bootloader with no help from the central.
+CONFIG_ZITAOTECH_BOOTMAGIC=y
+CONFIG_ZITAOTECH_BOOTMAGIC_STUDIO_RPC=n
+# Default power-up key on this half: the right half's own MO 1 key, the inner
+# key of its thumb row (keymap position 61).
+CONFIG_ZITAOTECH_BOOTMAGIC_DEFAULT_KEY=62
+
+# Log via USB or Segger RTT
+CONFIG_ZMK_USB_LOGGING=n
+# CONFIG_LOG_PROCESS_THREAD_STARTUP_DELAY_MS=4000
+
+# Encoder EC11
+CONFIG_EC11=y
+CONFIG_EC11_TRIGGER_GLOBAL_THREAD=y
+
+# I2C Trackpad
+CONFIG_I2C=y
+CONFIG_SENSOR=y
+CONFIG_LOG=y
+# CONFIG_SENSOR_LOG_LEVEL_DBG=n
+# CONFIG_INPUT_A320=y
+# CONFIG_ZMK_A320_INPUT_HANDLER=y
+
+# Enable Mouse
+CONFIG_INPUT=y
+CONFIG_ZMK_MOUSE=y
+CONFIG_ZMK_POINTING=y
+
+
+CONFIG_ZMK_RGB_UNDERGLOW=n
+
+# Hold the first-batch keyboard backlight gate low at GPIO initialization.
+CONFIG_GPIO_HOGS=y

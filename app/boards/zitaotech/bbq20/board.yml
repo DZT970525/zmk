@@ -1,0 +1,7 @@
+board:
+  name: bbq20
+  vendor: zitaotech
+  socs:
+    - name: nrf52840
+      variants:
+        - name: zmk

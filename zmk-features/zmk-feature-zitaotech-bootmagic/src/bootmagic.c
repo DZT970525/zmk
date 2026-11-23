@@ -8,9 +8,11 @@
  */
 
 #include <zephyr/device.h>
+#include <zmk/bootloader_feedback.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/kscan.h>
+#include <zephyr/drivers/hwinfo.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/retention/bootmode.h>
@@ -31,7 +33,11 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include <zitaotech/zmk/bootmagic.h>
 
+#if defined(CONFIG_BOARD_ZITAOTECH_KEYPOINT_LEFT) || defined(CONFIG_BOARD_ZITAOTECH_KEYPOINT_RIGHT)
 #define SETTINGS_PREFIX "zitaotech_bootmagic"
+#else
+#define SETTINGS_PREFIX "unified_bootmagic"
+#endif
 
 /* This half's own matrix: both halves name their kscan "kscan0", and the
  * transform carries the column offset, so a local (row, column) maps to the
@@ -52,6 +58,9 @@ static const struct gpio_dt_spec bm_cols[] = {
     LISTIFY(DT_PROP_LEN(BM_KSCAN, col_gpios), BM_COL_SPEC, ())};
 
 static atomic_t key_position = ATOMIC_INIT(CONFIG_ZITAOTECH_BOOTMAGIC_DEFAULT_KEY);
+#if (defined(CONFIG_BOARD_KEYPOINT_DONGLE) || defined(CONFIG_BOARD_SOFLE_DONGLE))
+static atomic_t left_remote_key = ATOMIC_INIT(ZITAOTECH_BOOTMAGIC_KEY_UNKNOWN);
+#endif
 static atomic_t remote_key = ATOMIC_INIT(ZITAOTECH_BOOTMAGIC_KEY_UNKNOWN);
 
 ZMK_EVENT_IMPL(zitaotech_bootmagic_key_changed);
@@ -69,6 +78,14 @@ ZMK_RELAY_EVENT_HANDLE(zitaotech_bootmagic_query, bmq, );
 int32_t zitaotech_bootmagic_key_position(void) { return (int32_t)atomic_get(&key_position); }
 
 int32_t zitaotech_bootmagic_remote_key(void) { return (int32_t)atomic_get(&remote_key); }
+
+int32_t zitaotech_bootmagic_studio_left_key(void) {
+#if (defined(CONFIG_BOARD_KEYPOINT_DONGLE) || defined(CONFIG_BOARD_SOFLE_DONGLE))
+    return atomic_get(&left_remote_key);
+#else
+    return zitaotech_bootmagic_key_position();
+#endif
+}
 
 bool zitaotech_bootmagic_peripheral_connected(void) {
 #if IS_ENABLED(CONFIG_ZMK_SPLIT) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
@@ -97,6 +114,13 @@ static void raise_mirror(int32_t position) {
     raise_zitaotech_bootmagic_mirror((struct zitaotech_bootmagic_mirror){
         .position = position,
         .source = ZMK_RELAY_EVENT_SOURCE_SELF,
+#if (defined(CONFIG_BOARD_KEYPOINT_DONGLE_LEFT) || defined(CONFIG_BOARD_SOFLE_DONGLE_LEFT) || defined(CONFIG_BOARD_ZITAOTECH_KEYPOINT_LEFT))
+        .side = 0,
+#elif (defined(CONFIG_BOARD_KEYPOINT_DONGLE_RIGHT) || defined(CONFIG_BOARD_SOFLE_DONGLE_RIGHT) || defined(CONFIG_BOARD_ZITAOTECH_KEYPOINT_RIGHT))
+        .side = 1,
+#elif (defined(CONFIG_BOARD_KEYPOINT_DONGLE) || defined(CONFIG_BOARD_SOFLE_DONGLE))
+        .side = 2,
+#endif
     });
 }
 
@@ -155,7 +179,23 @@ static bool bootmagic_key_held(int32_t position) {
     return false;
 }
 
+/* System-off wake runs startup again. Capture and consume the reset flags
+ * before application startup, retaining the decision for the early check and
+ * the later settings commit. Clearing avoids suppressing a future cold boot
+ * because Nordic reset flags accumulate until explicitly cleared. */
+static bool bootmagic_sleep_wake;
+static int bootmagic_capture_reset(void) {
+    uint32_t cause = 0;
+    if (hwinfo_get_reset_cause(&cause) == 0) {
+        bootmagic_sleep_wake = (cause & RESET_LOW_POWER_WAKE) != 0;
+        hwinfo_clear_reset_cause();
+    }
+    return 0;
+}
+SYS_INIT(bootmagic_capture_reset, PRE_KERNEL_1, 99);
+
 static void bootmagic_check(void) {
+    if (bootmagic_sleep_wake) return;
     int32_t position = zitaotech_bootmagic_key_position();
     if (position < 0) {
         return;
@@ -172,7 +212,7 @@ static void bootmagic_check(void) {
         return;
     }
 
-    sys_reboot(SYS_REBOOT_COLD);
+    zmk_bootloader_feedback_reboot(SYS_REBOOT_COLD);
 }
 
 int zitaotech_bootmagic_set_key(bool peripheral, int32_t position) {
@@ -180,6 +220,14 @@ int zitaotech_bootmagic_set_key(bool peripheral, int32_t position) {
         return -EINVAL;
     }
 
+#if (defined(CONFIG_BOARD_KEYPOINT_DONGLE) || defined(CONFIG_BOARD_SOFLE_DONGLE))
+    if (!zitaotech_bootmagic_peripheral_connected()) return -ENOTCONN;
+    raise_zitaotech_bootmagic_mirror((struct zitaotech_bootmagic_mirror){
+        .position = position, .source = ZMK_RELAY_EVENT_SOURCE_SELF, .side = peripheral ? 1 : 0});
+    atomic_set(peripheral ? &remote_key : &left_remote_key, position);
+    mark_changed();
+    return 0;
+#endif
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     if (peripheral) {
         /* The setting lives on the other half, so refuse rather than store
@@ -189,7 +237,14 @@ int zitaotech_bootmagic_set_key(bool peripheral, int32_t position) {
         }
         /* Store it on the other half: it is that half which reads the setting
          * before its own keyboard starts. */
-        raise_mirror(position);
+        /* A command sent by the left master targets the right half. Its side
+         * is not the sender's own side used by raise_mirror() for reports. */
+        raise_zitaotech_bootmagic_mirror((struct zitaotech_bootmagic_mirror){
+            .position=position, .source=ZMK_RELAY_EVENT_SOURCE_SELF,
+#if defined(CONFIG_BOARD_SOFLE_DONGLE_LEFT) || defined(CONFIG_BOARD_ZITAOTECH_KEYPOINT_LEFT) || defined(CONFIG_BOARD_KEYPOINT_DONGLE_LEFT)
+            .side=1,
+#endif
+        });
         atomic_set(&remote_key, (atomic_val_t)position);
         mark_changed();
         return 0;
@@ -253,9 +308,13 @@ SETTINGS_STATIC_HANDLER_DEFINE(zitaotech_bootmagic, SETTINGS_PREFIX, NULL, bootm
  * own and the key only has to be held while the keyboard starts.
  */
 static int bootmagic_early_check(void) {
-    if (settings_subsys_init() == 0) {
+    /* Reset firmware uses factory keys and checks before erasing flash. */
+    if (!IS_ENABLED(CONFIG_ZMK_SETTINGS_RESET_ON_START) && settings_subsys_init() == 0) {
         /* Just this subtree; the rest is loaded by main() as usual. */
+        uint32_t settings_started = k_uptime_get_32();
         settings_load_subtree(SETTINGS_PREFIX);
+        LOG_INF("boot timing: Bootmagic settings %u ms, finished at %u ms",
+                k_uptime_get_32() - settings_started, k_uptime_get_32());
     }
 
     bootmagic_check();
@@ -280,8 +339,18 @@ static int bootmagic_mirror_listener(const zmk_event_t *eh) {
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     /* Came from the other half: remember it for the UI. */
-    atomic_set(&remote_key, (atomic_val_t)ev->position);
+#if (defined(CONFIG_BOARD_KEYPOINT_DONGLE) || defined(CONFIG_BOARD_SOFLE_DONGLE))
+    if (ev->side > 1) return ZMK_EV_EVENT_BUBBLE;
+    atomic_set(ev->side == 0 ? &left_remote_key : &remote_key, ev->position);
 #else
+    atomic_set(&remote_key, (atomic_val_t)ev->position);
+#endif
+#else
+#if (defined(CONFIG_BOARD_KEYPOINT_DONGLE_LEFT) || defined(CONFIG_BOARD_SOFLE_DONGLE_LEFT) || defined(CONFIG_BOARD_ZITAOTECH_KEYPOINT_LEFT))
+    if (ev->side != 0) return ZMK_EV_EVENT_BUBBLE;
+#elif (defined(CONFIG_BOARD_KEYPOINT_DONGLE_RIGHT) || defined(CONFIG_BOARD_SOFLE_DONGLE_RIGHT) || defined(CONFIG_BOARD_ZITAOTECH_KEYPOINT_RIGHT))
+    if (ev->side != 1) return ZMK_EV_EVENT_BUBBLE;
+#endif
     /* Came from the central: this half owns the setting, so store it. */
     atomic_set(&key_position, (atomic_val_t)ev->position);
     settings_save_one(SETTINGS_PREFIX "/key", &ev->position, sizeof(ev->position));
@@ -319,7 +388,11 @@ K_WORK_DELAYABLE_DEFINE(bootmagic_query_work, bootmagic_query_work_handler);
 
 static void bootmagic_query_work_handler(struct k_work *work) {
     if (!zitaotech_bootmagic_peripheral_connected() ||
-        zitaotech_bootmagic_remote_key() != ZITAOTECH_BOOTMAGIC_KEY_UNKNOWN) {
+        ((zitaotech_bootmagic_remote_key() != ZITAOTECH_BOOTMAGIC_KEY_UNKNOWN)
+#if (defined(CONFIG_BOARD_KEYPOINT_DONGLE) || defined(CONFIG_BOARD_SOFLE_DONGLE))
+         && atomic_get(&left_remote_key) != ZITAOTECH_BOOTMAGIC_KEY_UNKNOWN
+#endif
+        )) {
         atomic_set(&bootmagic_query_attempts, 0);
         return;
     }

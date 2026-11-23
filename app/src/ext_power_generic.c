@@ -13,6 +13,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/sys/atomic.h>
 
 #include <drivers/ext_power.h>
 
@@ -30,7 +31,7 @@ struct ext_power_generic_config {
 struct ext_power_generic_data {
     bool status;
 #if IS_ENABLED(CONFIG_SETTINGS)
-    bool settings_init;
+    atomic_t requested_on;
 #endif
 };
 
@@ -41,7 +42,11 @@ static void ext_power_save_state_work(struct k_work *work) {
     struct ext_power_generic_data *data = ext_power->data;
 
     snprintf(setting_path, sizeof(setting_path), "ext_power/state/%s", ext_power->name);
-    settings_save_one(setting_path, &data->status, sizeof(data->status));
+    /* Persist user intent, never the temporary suspend state. Keep the
+     * existing one-byte 0/1 storage format for installed keyboards. */
+    uint8_t requested = atomic_get(&data->requested_on) ? 1 : 0;
+    int rc = settings_save_one(setting_path, &requested, sizeof(requested));
+    if (rc < 0) LOG_WRN("External power state save failed: %d", rc);
 }
 
 static struct k_work_delayable ext_power_save_work;
@@ -56,34 +61,36 @@ int ext_power_save_state(void) {
 #endif
 }
 
-static int ext_power_generic_enable(const struct device *dev) {
+/* Hardware changes during init, settings restore and PM must not enqueue
+ * settings writes. Only explicit API calls change the persisted preference. */
+static int ext_power_apply(const struct device *dev, bool enabled) {
     struct ext_power_generic_data *data = dev->data;
     const struct ext_power_generic_config *config = dev->config;
-
-    for (int i = 0; i < config->control_gpios_count; i++) {
-        const struct gpio_dt_spec *gpio = &config->control[i];
-        if (gpio_pin_set_dt(gpio, 1)) {
-            LOG_WRN("Failed to set ext-power control pin %d", i);
-            return -EIO;
-        }
+    for (size_t i = 0; i < config->control_gpios_count; i++) {
+        int rc = gpio_pin_set_dt(&config->control[i], enabled ? 1 : 0);
+        if (rc < 0) return rc;
     }
-    data->status = true;
-    return ext_power_save_state();
+    data->status = enabled;
+    return 0;
+}
+
+static int ext_power_request(const struct device *dev, bool enabled) {
+    int rc = ext_power_apply(dev, enabled);
+    if (rc < 0) return rc;
+#if IS_ENABLED(CONFIG_SETTINGS)
+    struct ext_power_generic_data *data = dev->data;
+    if (atomic_set(&data->requested_on, enabled ? 1 : 0) != (enabled ? 1 : 0))
+        return ext_power_save_state();
+#endif
+    return 0;
+}
+
+static int ext_power_generic_enable(const struct device *dev) {
+    return ext_power_request(dev, true);
 }
 
 static int ext_power_generic_disable(const struct device *dev) {
-    struct ext_power_generic_data *data = dev->data;
-    const struct ext_power_generic_config *config = dev->config;
-
-    for (int i = 0; i < config->control_gpios_count; i++) {
-        const struct gpio_dt_spec *gpio = &config->control[i];
-        if (gpio_pin_set_dt(gpio, 0)) {
-            LOG_WRN("Failed to clear ext-power control pin %d", i);
-            return -EIO;
-        }
-    }
-    data->status = false;
-    return ext_power_save_state();
+    return ext_power_request(dev, false);
 }
 
 static int ext_power_generic_get(const struct device *dev) {
@@ -96,23 +103,15 @@ static int ext_power_settings_set_status(const struct device *dev, size_t len,
                                          settings_read_cb read_cb, void *cb_arg) {
     struct ext_power_generic_data *data = dev->data;
 
-    if (len != sizeof(data->status)) {
-        return -EINVAL;
-    }
-
-    int rc = read_cb(cb_arg, &data->status, sizeof(data->status));
-    if (rc >= 0) {
-        data->settings_init = true;
-
-        if (data->status) {
-            ext_power_generic_enable(dev);
-        } else {
-            ext_power_generic_disable(dev);
-        }
-
-        return 0;
-    }
-    return rc;
+    uint8_t requested;
+    if (len != sizeof(requested)) return -EINVAL;
+    int rc = read_cb(cb_arg, &requested, sizeof(requested));
+    if (rc != sizeof(requested)) return rc < 0 ? rc : -EINVAL;
+    if (requested > 1) return -EINVAL;
+    rc = ext_power_apply(dev, requested != 0);
+    if (rc < 0) return rc;
+    atomic_set(&data->requested_on, requested);
+    return 0;
 }
 
 static int ext_power_settings_set(const char *name, size_t len, settings_read_cb read_cb,
@@ -127,23 +126,10 @@ static int ext_power_settings_set(const char *name, size_t len, settings_read_cb
     return -ENOENT;
 }
 
-static int ext_power_settings_commit() {
-    const struct device *dev = DEVICE_DT_GET(DT_DRV_INST(0));
-    struct ext_power_generic_data *data = dev->data;
-
-    if (!data->settings_init) {
-
-        data->status = true;
-        k_work_schedule(&ext_power_save_work, K_NO_WAIT);
-
-        ext_power_enable(dev);
-    }
-
-    return 0;
-}
-
+/* No commit-time save: an absent record means the default enabled state.
+ * Loading settings must not create a competing writer on the system queue. */
 SETTINGS_STATIC_HANDLER_DEFINE(ext_power, "ext_power/state", NULL, ext_power_settings_set,
-                               ext_power_settings_commit, NULL);
+                               NULL, NULL);
 
 #endif
 
@@ -162,8 +148,12 @@ static int ext_power_generic_init(const struct device *dev) {
     k_work_init_delayable(&ext_power_save_work, ext_power_save_state_work);
 #endif
 
-    // Enable by default. We may get disabled again once settings load.
-    ext_power_enable(dev);
+    /* Power up before probing devices, without persisting during startup. */
+#if IS_ENABLED(CONFIG_SETTINGS)
+    atomic_set(&((struct ext_power_generic_data *)dev->data)->requested_on, 1);
+#endif
+    int rc = ext_power_apply(dev, true);
+    if (rc < 0) return rc;
 
     if (config->init_delay_ms) {
         k_msleep(config->init_delay_ms);
@@ -176,11 +166,14 @@ static int ext_power_generic_init(const struct device *dev) {
 static int ext_power_generic_pm_action(const struct device *dev, enum pm_device_action action) {
     switch (action) {
     case PM_DEVICE_ACTION_RESUME:
-        ext_power_generic_enable(dev);
-        return 0;
+#if IS_ENABLED(CONFIG_SETTINGS)
+        return ext_power_apply(dev, atomic_get(
+            &((struct ext_power_generic_data *)dev->data)->requested_on) != 0);
+#else
+        return ext_power_apply(dev, true);
+#endif
     case PM_DEVICE_ACTION_SUSPEND:
-        ext_power_generic_disable(dev);
-        return 0;
+        return ext_power_apply(dev, false);
     default:
         return -ENOTSUP;
     }
@@ -198,7 +191,7 @@ static const struct ext_power_generic_config config = {
 static struct ext_power_generic_data data = {
     .status = false,
 #if IS_ENABLED(CONFIG_SETTINGS)
-    .settings_init = false,
+    .requested_on = ATOMIC_INIT(1),
 #endif
 };
 

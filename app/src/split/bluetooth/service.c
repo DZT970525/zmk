@@ -17,6 +17,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/uuid.h>
+#if defined(CONFIG_ZMK_KEYPOINT_SPLIT_MOTION_MAX_AGE_MS) && CONFIG_ZMK_KEYPOINT_SPLIT_MOTION_MAX_AGE_MS > 0
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+#endif
 
 #include <drivers/behavior.h>
 #include <zmk/stdlib.h>
@@ -83,8 +86,13 @@ static zmk_hid_indicators_t hid_indicators = 0;
 
 static void split_svc_update_indicators_callback(struct k_work *work) {
     LOG_DBG("Raising HID indicators changed event: %x", hid_indicators);
-    raise_zmk_hid_indicators_changed(
-        (struct zmk_hid_indicators_changed){.indicators = hid_indicators});
+    /* Update the peripheral's profile cache before notifying consumers.
+     * Raising only the event leaves get_current_profile() stuck at zero. */
+    struct zmk_split_transport_central_command cmd = {
+        .type = ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_SET_HID_INDICATORS,
+        .data.set_hid_indicators.indicators = hid_indicators,
+    };
+    zmk_split_transport_peripheral_command_handler(zmk_split_transport_peripheral_bt(), cmd);
 }
 
 static K_WORK_DEFINE(split_svc_update_indicators_work, split_svc_update_indicators_callback);
@@ -288,7 +296,14 @@ BT_GATT_SERVICE_DEFINE(
                            BT_GATT_CHRC_NOTIFY, BT_GATT_PERM_READ_ENCRYPT, NULL, NULL, NULL),
     BT_GATT_CCC(image_ccc, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 #endif
+    #if IS_ENABLED(CONFIG_ZMK_SPLIT_DUAL_ROLE_BUILD)
+/* Receiver-only split nodes belong to the central half of this hybrid build.
+ * Do not advertise them as physical input channels while LEFT is peripheral. */
+#define HYBRID_INPUT_SPLIT_CHARS(n) COND_CODE_1(DT_NODE_HAS_PROP(n, device), (INPUT_SPLIT_CHARS(n)), ())
+    DT_FOREACH_STATUS_OKAY(zmk_input_split, HYBRID_INPUT_SPLIT_CHARS)
+#else
     DT_FOREACH_STATUS_OKAY(zmk_input_split, INPUT_SPLIT_CHARS)
+#endif
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
         BT_GATT_CHARACTERISTIC(BT_UUID_DECLARE_128(ZMK_SPLIT_BT_UPDATE_HID_INDICATORS_UUID),
                                BT_GATT_CHRC_WRITE_WITHOUT_RESP, BT_GATT_PERM_WRITE_ENCRYPT, NULL,
@@ -469,6 +484,9 @@ static int zmk_split_bt_sensor_triggered(uint8_t sensor_index,
 struct input_event_notify_item {
     uint16_t attr_index;
     struct zmk_split_input_event_payload payload;
+#if defined(CONFIG_ZMK_KEYPOINT_SPLIT_MOTION_MAX_AGE_MS) && CONFIG_ZMK_KEYPOINT_SPLIT_MOTION_MAX_AGE_MS > 0
+    uint32_t enqueued_at;
+#endif
 };
 
 K_MSGQ_DEFINE(input_event_msgq, sizeof(struct input_event_notify_item),
@@ -477,6 +495,18 @@ K_MSGQ_DEFINE(input_event_msgq, sizeof(struct input_event_notify_item),
 static void send_input_event_callback(struct k_work *work) {
     struct input_event_notify_item item;
     while (k_msgq_get(&input_event_msgq, &item, K_NO_WAIT) == 0) {
+#if defined(CONFIG_ZMK_KEYPOINT_SPLIT_MOTION_MAX_AGE_MS) && CONFIG_ZMK_KEYPOINT_SPLIT_MOTION_MAX_AGE_MS > 0
+        if (item.payload.type == INPUT_EV_REL &&
+            (item.payload.code == INPUT_REL_X || item.payload.code == INPUT_REL_Y) &&
+            (uint32_t)(k_uptime_get_32() - item.enqueued_at) >
+                CONFIG_ZMK_KEYPOINT_SPLIT_MOTION_MAX_AGE_MS) {
+            /* Keep sync markers so an old X cannot merge with a later Y. */
+            if (!item.payload.sync) {
+                continue;
+            }
+            item.payload.value = 0;
+        }
+#endif
         int err = bt_gatt_notify(NULL, &split_svc.attrs[item.attr_index], &item.payload,
                                  sizeof(item.payload));
         if (err) {
@@ -502,6 +532,9 @@ static int zmk_split_bt_report_input(uint8_t reg, uint8_t type, uint16_t code, i
             };
 
             struct input_event_notify_item item = {.attr_index = (uint16_t)i, .payload = payload};
+#if defined(CONFIG_ZMK_KEYPOINT_SPLIT_MOTION_MAX_AGE_MS) && CONFIG_ZMK_KEYPOINT_SPLIT_MOTION_MAX_AGE_MS > 0
+            item.enqueued_at = k_uptime_get_32();
+#endif
             int err = k_msgq_put(&input_event_msgq, &item, K_NO_WAIT);
 
             if (err == 0) {
@@ -518,6 +551,8 @@ static int zmk_split_bt_report_input(uint8_t reg, uint8_t type, uint16_t code, i
                     LOG_WRN("Failed to queue input event (%d)", err);
                     return err;
                 }
+                k_work_submit_to_queue(&service_work_q, &service_input_notify_work);
+                return 0;
             }
         }
     }

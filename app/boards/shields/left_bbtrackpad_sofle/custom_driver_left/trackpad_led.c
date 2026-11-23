@@ -164,7 +164,9 @@ static int usb_led_listener(const zmk_event_t *event) {
     return ZMK_EV_EVENT_BUBBLE;
 }
 ZMK_LISTENER(trackpad_usb_led, usb_led_listener);
+#if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 ZMK_SUBSCRIPTION(trackpad_usb_led, zmk_endpoint_changed);
+#endif
 #if IS_ENABLED(CONFIG_ZMK_USB)
 ZMK_SUBSCRIPTION(trackpad_usb_led, zmk_usb_conn_state_changed);
 #endif
@@ -257,7 +259,15 @@ void indicator_tp_arrow_fired(void) {
 /* DPI changes retune the brightness while the pad is in use. */
 static void dpi_changed_work_handler(struct k_work *work) {
     ARG_UNUSED(work);
-
+#if IS_ENABLED(CONFIG_BOARD_KEYPOINT_DONGLE_LEFT)
+    /* A DPI edit is visible even when the user's hand is off the pad.
+     * Caps Lock breathing still has priority in apply_led_state(). */
+    atomic_set(&usb_flash_cancelled, 1);
+    usb_flash_on = false;
+    k_work_cancel_delayable(&usb_flash_work);
+    touch_active = true;
+    k_work_reschedule_for_queue(&indicator_workq, &touch_off_work, K_MSEC(touch_on_ms()));
+#endif
     apply_led_state();
 }
 

@@ -28,6 +28,9 @@
 /* Keymap layer used as the automatic mouse layer (see &bbtrackpad_listener). */
 #define MOUSE_LAYER_ID 4
 
+#include <behaviors/runtime_tap_dance.dtsi>
+#define ZMK_BEHAVIORS_KEEP_DEFAULT_LAYER
+#include <behaviors/default_layer.dtsi>
 #include "zitaotech_q20-layouts.dtsi"
 
 / {
@@ -66,9 +69,7 @@
         pwm_led_0 {
             pwms = <&pwm0 0 PWM_USEC(20) PWM_POLARITY_NORMAL>;
         };
-        pwm_led_1 {
-            pwms = <&pwm1 0 PWM_MSEC(10) PWM_POLARITY_NORMAL>;
-        };
+
     };
 
     /*
@@ -80,6 +81,9 @@
         compatible = "pwm-leds";
         pwm_led_0 {
             pwms = <&pwm2 0 PWM_USEC(20) PWM_POLARITY_NORMAL>;
+        };
+        pwm_led_1 {
+            pwms = <&pwm1 0 PWM_MSEC(10) PWM_POLARITY_NORMAL>;
         };
     };
 
@@ -131,12 +135,6 @@ RC(4,1)          RC(4,3)             RC(4,5)             RC(4,6)          RC(4,4
             ;
     };
 
-    leds {
-        compatible = "gpio-leds";
-        blue_led: led_0 {
-            gpios = <&gpio0 10 GPIO_ACTIVE_HIGH>;
-        };
-    };
 
     /* Node name must match original "EXT_POWER" label to preserve user settings. */
     EXT_POWER {
@@ -288,13 +286,13 @@ zephyr_udc0: &usbd {
 
     pwm1_default: pwm1_default {
         group1 {
-            psels = <NRF_PSEL(PWM_OUT0, 0, 17)>;      // keyboard backlight/Set2
+            psels = <NRF_PSEL(PWM_OUT0, 0, 17)>;      // backlight for layer/Set2
         };
     };
 
     pwm1_sleep: pwm1_sleep {
         group1 {
-            psels = <NRF_PSEL(PWM_OUT0, 0, 17)>;      // keyboard backlight/Set2
+            psels = <NRF_PSEL(PWM_OUT0, 0, 17)>;      // backlight for layer/Set2
             bias-pull-down;
         };
     };

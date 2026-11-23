@@ -7,6 +7,9 @@
 #define DT_DRV_COMPAT zmk_input_processor_temp_layer
 
 #include <zephyr/kernel.h>
+#include <zephyr/sys/atomic.h>
+#include <zephyr/settings/settings.h>
+#include <string.h>
 #include <zephyr/device.h>
 #include <drivers/input_processor.h>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
@@ -52,6 +55,7 @@ struct temp_layer_config {
 struct temp_layer_state {
     uint8_t toggle_layer;
     bool is_active;
+    bool activation_pending;
     int64_t last_tapped_timestamp;
 };
 
@@ -63,6 +67,65 @@ struct temp_layer_data {
 
 /* Static Work Queue Items */
 static struct k_work_delayable layer_disable_works[MAX_LAYERS];
+
+#if IS_ENABLED(CONFIG_ZMK_INPUT_PROCESSOR_TEMP_LAYER_PRIORITY)
+static atomic_t priority_layer_id = ATOMIC_INIT(-1);
+/* Opt-in at runtime: old and freshly reset keyboards remain base-only. */
+static atomic_t overlay_nonbase_enabled = ATOMIC_INIT(0);
+bool zmk_input_processor_temp_layer_overlay_enabled(void) {
+    return atomic_get(&overlay_nonbase_enabled) != 0;
+}
+int zmk_input_processor_temp_layer_set_overlay(bool enabled) {
+    uint8_t value = enabled;
+#if IS_ENABLED(CONFIG_SETTINGS)
+    int rc = settings_save_one("temp_layer/overlay_nonbase", &value, sizeof(value));
+    if (rc < 0) return rc;
+#endif
+    atomic_set(&overlay_nonbase_enabled, value);
+    int layer = atomic_get(&priority_layer_id);
+    if (!enabled && layer >= 0 && layer < MAX_LAYERS &&
+        (zmk_keymap_layer_state() & ~BIT(layer) & ~BIT(zmk_keymap_layer_default()))) {
+        /* Remove just the automatic layer, preserving every underlying layer. */
+        zmk_keymap_layer_deactivate(layer, false);
+    }
+    return 0;
+}
+#if IS_ENABLED(CONFIG_SETTINGS)
+static int overlay_settings_set(const char *name, size_t len, settings_read_cb read, void *arg) {
+    if (strcmp(name, "overlay_nonbase")) return -ENOENT;
+    if (len != sizeof(uint8_t)) return -EINVAL;
+    uint8_t value;
+    int rc = read(arg, &value, sizeof(value));
+    if (rc < 0) return rc;
+    if (rc != sizeof(value) || value > 1) return -EINVAL;
+    atomic_set(&overlay_nonbase_enabled, value);
+    return 0;
+}
+SETTINGS_STATIC_HANDLER_DEFINE(temp_layer_overlay, "temp_layer", NULL, overlay_settings_set, NULL, NULL);
+#endif
+int zmk_input_processor_temp_layer_priority(void) {
+    int layer = atomic_get(&priority_layer_id);
+    return zmk_input_processor_temp_layer_overlay_enabled() && layer >= 0 && layer < MAX_LAYERS &&
+           zmk_keymap_layer_active(layer) ? layer : -1;
+}
+#endif
+
+void zmk_input_processor_temp_layer_extend(uint32_t layer, uint32_t extra_ms) {
+    if (layer >= MAX_LAYERS || !extra_ms) return;
+    const struct device *dev = DEVICE_DT_INST_GET(0);
+    struct temp_layer_data *data = dev->data;
+    k_mutex_lock(&data->lock, K_FOREVER);
+    if (data->state.is_active && data->state.toggle_layer == layer &&
+        zmk_keymap_layer_active(zmk_keymap_layer_index_to_id(layer)) &&
+        k_work_delayable_is_pending(&layer_disable_works[layer])) {
+        /* Zephyr returns ticks, not milliseconds. Keep the deadline in ticks
+         * and convert only the requested extension. */
+        k_ticks_t remaining = k_work_delayable_remaining_get(&layer_disable_works[layer]);
+        k_work_reschedule(&layer_disable_works[layer],
+                          K_TICKS(remaining + k_ms_to_ticks_ceil64(extra_ms)));
+    }
+    k_mutex_unlock(&data->lock);
+}
 
 /* Position Search */
 static bool position_is_excluded(const struct temp_layer_config *config, uint32_t position) {
@@ -92,12 +155,21 @@ static void update_layer_state(struct temp_layer_state *state, bool activate) {
         return;
     }
 
+    uint8_t layer_id = zmk_keymap_layer_index_to_id(state->toggle_layer);
+    if (layer_id >= MAX_LAYERS) return;
     state->is_active = activate;
+#if IS_ENABLED(CONFIG_ZMK_INPUT_PROCESSOR_TEMP_LAYER_PRIORITY)
     if (activate) {
-        zmk_keymap_layer_activate(state->toggle_layer, false);
+        atomic_set(&priority_layer_id, layer_id);
+    } else {
+        atomic_cas(&priority_layer_id, layer_id, -1);
+    }
+#endif
+    if (activate) {
+        zmk_keymap_layer_activate(layer_id, false);
         LOG_DBG("Layer %d activated", state->toggle_layer);
     } else {
-        zmk_keymap_layer_deactivate(state->toggle_layer, false);
+        zmk_keymap_layer_deactivate(layer_id, false);
         LOG_DBG("Layer %d deactivated", state->toggle_layer);
     }
 }
@@ -123,12 +195,26 @@ static void layer_action_work_cb(struct k_work *work) {
 
     struct layer_state_action action;
 
-    while (k_msgq_get(&temp_layer_action_msgq, &action, K_MSEC(10)) >= 0) {
+    /* Drain ready actions only: waiting here holds the pointer-input lock and
+     * the shared work queue even after all layer changes have completed. */
+    while (k_msgq_get(&temp_layer_action_msgq, &action, K_NO_WAIT) >= 0) {
         if (!action.activate) {
-            if (zmk_keymap_layer_active(action.layer)) {
+            if (zmk_keymap_layer_active(zmk_keymap_layer_index_to_id(action.layer))) {
                 update_layer_state(&data->state, false);
             }
         } else {
+            data->state.activation_pending = false;
+#if IS_ENABLED(CONFIG_ZMK_INPUT_PROCESSOR_TEMP_LAYER_PRIORITY)
+            /* A queued motion must not undo a switch-off or layer change
+             * that happened before this worker acquired the lock. */
+            uint8_t layer_id = zmk_keymap_layer_index_to_id(action.layer);
+            if (layer_id >= MAX_LAYERS ||
+                (!zmk_input_processor_temp_layer_overlay_enabled() &&
+                 (zmk_keymap_layer_state() & ~BIT(layer_id) &
+                  ~BIT(zmk_keymap_layer_default())))) {
+                continue;
+            }
+#endif
             update_layer_state(&data->state, true);
         }
     }
@@ -159,6 +245,10 @@ static int handle_layer_state_changed(const struct device *dev, const zmk_event_
     if (!zmk_keymap_layer_active(zmk_keymap_layer_index_to_id(data->state.toggle_layer))) {
         LOG_DBG("Deactivating layer that was activated by this processor");
         data->state.is_active = false;
+#if IS_ENABLED(CONFIG_ZMK_INPUT_PROCESSOR_TEMP_LAYER_PRIORITY)
+        atomic_cas(&priority_layer_id,
+                   zmk_keymap_layer_index_to_id(data->state.toggle_layer), -1);
+#endif
         k_work_cancel_delayable(&layer_disable_works[data->state.toggle_layer]);
     }
     ret = k_mutex_unlock(&data->lock);
@@ -198,7 +288,7 @@ static int handle_position_state_changed(const struct device *dev, const zmk_eve
 
 static int handle_keycode_state_changed(const struct device *dev, const zmk_event_t *eh) {
     const struct zmk_keycode_state_changed *ev = as_zmk_keycode_state_changed(eh);
-    if (!ev->state) {
+    if (!ev->state || ev->from_sensor) {
         return ZMK_EV_EVENT_BUBBLE;
     }
 
@@ -280,14 +370,15 @@ static int temp_layer_handle_event(const struct device *dev, struct input_event 
         return ZMK_INPUT_PROC_CONTINUE;
     }
 
-    if (!data->state.is_active &&
+    if (!data->state.is_active && !data->state.activation_pending &&
         !should_quick_tap(cfg, data->state.last_tapped_timestamp, k_uptime_get())) {
         struct layer_state_action action = {.layer = param1, .activate = true};
 
-        int ret = k_msgq_put(&temp_layer_action_msgq, &action, K_MSEC(10));
+        int ret = k_msgq_put(&temp_layer_action_msgq, &action, K_NO_WAIT);
         if (ret < 0) {
             LOG_ERR("Failed to enqueue action to enable layer %d (%d)", param1, ret);
         } else {
+            data->state.activation_pending = true;
             k_work_submit(&layer_action_work);
         }
     }

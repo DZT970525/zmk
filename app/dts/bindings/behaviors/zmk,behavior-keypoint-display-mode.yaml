@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: MIT
+description: Cycle enabled KEYPOINT left screen display modes
+compatible: "zmk,behavior-keypoint-display-mode"
+include: zero_param.yaml

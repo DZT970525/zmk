@@ -54,7 +54,8 @@ static int bootmagic_subsystem_index(void) {
 }
 
 static void fill_state(zitaotech_bootmagic_State *out) {
-    out->central_key = zitaotech_bootmagic_key_position();
+    out->central_key = zitaotech_bootmagic_studio_left_key();
+    if (out->central_key == ZITAOTECH_BOOTMAGIC_KEY_UNKNOWN) out->central_key = -1;
     int32_t remote = zitaotech_bootmagic_remote_key();
     out->peripheral_key = remote == ZITAOTECH_BOOTMAGIC_KEY_UNKNOWN ? -1 : remote;
     out->peripheral_connected = zitaotech_bootmagic_peripheral_connected();

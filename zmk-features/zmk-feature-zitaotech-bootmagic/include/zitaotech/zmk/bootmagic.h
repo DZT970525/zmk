@@ -34,6 +34,7 @@ void zitaotech_bootmagic_suppress_notifications(bool suppress);
 
 /** The other half's key as last relayed to us, or UNKNOWN. */
 int32_t zitaotech_bootmagic_remote_key(void);
+int32_t zitaotech_bootmagic_studio_left_key(void);
 
 /**
  * Whether the other half is reachable right now.  Nothing heartbeats: the
@@ -63,6 +64,9 @@ ZMK_EVENT_DECLARE(zitaotech_bootmagic_key_changed);
 struct zitaotech_bootmagic_mirror {
     int32_t position;
     uint8_t source;
+#if (defined(CONFIG_BOARD_KEYPOINT_DONGLE) || defined(CONFIG_BOARD_SOFLE_DONGLE)) || (defined(CONFIG_BOARD_KEYPOINT_DONGLE_LEFT) || defined(CONFIG_BOARD_SOFLE_DONGLE_LEFT) || defined(CONFIG_BOARD_ZITAOTECH_KEYPOINT_LEFT)) || (defined(CONFIG_BOARD_KEYPOINT_DONGLE_RIGHT) || defined(CONFIG_BOARD_SOFLE_DONGLE_RIGHT) || defined(CONFIG_BOARD_ZITAOTECH_KEYPOINT_RIGHT))
+    uint8_t side;
+#endif
 };
 
 ZMK_EVENT_DECLARE(zitaotech_bootmagic_mirror);

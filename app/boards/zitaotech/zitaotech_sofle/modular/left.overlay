@@ -1,0 +1,32 @@
+/* The slot wiring belongs to the half, not to the fitted module. */
+/ {
+    chosen { zmk,custom_led = &left_trackpoint_led; };
+    left_trackpoint_led: left_trackpoint_led {
+        compatible = "pwm-leds";
+        led { pwms = <&pwm1 1 PWM_USEC(20) PWM_POLARITY_NORMAL>; };
+    };
+};
+/* Touchpad retains channel 0/P0.07; TrackPoint uses channel 1/P0.16. */
+&pwm1_default {
+    group1 { psels = <NRF_PSEL(PWM_OUT0, 0, 7)>, <NRF_PSEL(PWM_OUT1, 0, 16)>; };
+};
+&pwm1_sleep {
+    group1 { psels = <NRF_PSEL(PWM_OUT0, 0, 7)>, <NRF_PSEL(PWM_OUT1, 0, 16)>; };
+};
+&i2c0 { trackpoint: trackpoint@15 { compatible = "zmk,trackpoint"; reg = <0x15>; status = "okay"; }; };
+/ {
+    split_inputs {
+        left_trackpoint_split: left_trackpoint_split@2 { compatible = "zmk,input-split"; reg = <2>; device = <&trackpoint>; };
+        right_trackpad_split: right_trackpad_split@3 { compatible = "zmk,input-split"; reg = <3>; };
+    };
+    input_processors {
+        left_tp_processor: left_tp_processor { compatible = "zmk,input-processor-sofle-left-trackpoint"; #input-processor-cells = <0>; track-remainders; };
+        right_pad_processor: right_pad_processor { compatible = "zmk,input-processor-sofle-right-trackpad"; #input-processor-cells = <0>; };
+    };
+    left_trackpoint_listener { compatible = "zmk,input-listener"; device = <&left_trackpoint_split>;
+        input-processors = <&zip_temp_layer 3 600>, <&left_tp_processor>, <&ip_behaviors0>, <&ip_behaviors1>, <&ip_behaviors2>, <&ip_behaviors3>;
+    };
+    right_trackpad_listener { compatible = "zmk,input-listener"; device = <&right_trackpad_split>;
+        input-processors = <&zip_temp_layer 3 600>, <&right_pad_processor>, <&ip_behaviors0>, <&ip_behaviors1>, <&ip_behaviors2>, <&ip_behaviors3>;
+    };
+};

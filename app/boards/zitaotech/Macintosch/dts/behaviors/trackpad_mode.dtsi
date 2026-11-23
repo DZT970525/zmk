@@ -1,0 +1,21 @@
+/*
+ * Trackpad mode switch behavior (&TP).
+ *
+ * Switches the trackpad between pointer mode and direction mode.  The key is
+ * inert until the mode-switch key is enabled on ZitaoTech Studio's Trackpad
+ * page; the board keymap puts it on LOWER's (layer 1's) X key.
+ *
+ * Copyright (c) 2026 ZitaoTech
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+/ {
+    behaviors {
+        /omit-if-no-ref/ TP: trackpad_mode {
+            compatible = "zmk,behavior-trackpad-mode";
+            #binding-cells = <1>;
+            display-name = "TP MODE SWITCH";
+        };
+    };
+};

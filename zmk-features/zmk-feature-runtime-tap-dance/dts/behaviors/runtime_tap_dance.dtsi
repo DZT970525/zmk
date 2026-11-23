@@ -1,0 +1,9 @@
+/ {
+    behaviors {
+        rtd: runtime_tap_dance {
+            compatible = "zitaotech,behavior-runtime-tap-dance";
+            #binding-cells = <1>;
+            display-name = "Runtime Tap Dance";
+        };
+    };
+};

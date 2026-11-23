@@ -59,7 +59,9 @@ static struct k_work_q tp_workq;
 /* ========= Motion GPIO ========= */
 
 #define MOTION_GPIO_NODE DT_NODELABEL(gpio0)
+#ifndef MOTION_GPIO_PIN
 #define MOTION_GPIO_PIN 14
+#endif
 #define MOTION_GPIO_FLAGS (GPIO_ACTIVE_LOW | GPIO_PULL_UP)
 
 /* ========= TrackPoint 常量 ========= */
@@ -73,6 +75,7 @@ static uint32_t last_activity_time = 0;
 #define TRACKPOINT_WDT_TIMEOUT 200
 /* ========= 全局状态 ========= */
 static bool scroll_key_pressed = false;
+static uint32_t scroll_key_pressed_at;
 uint32_t last_packet_time = 0;
 
 /* ==== HID indicators ==== */
@@ -106,6 +109,9 @@ static int special_key_listener_cb(const zmk_event_t *eh) {
 #endif
 
     if (position >= 0 && ev->position == (uint32_t)position) {
+        if (ev->state && !scroll_key_pressed) {
+            scroll_key_pressed_at = k_uptime_get_32();
+        }
         scroll_key_pressed = ev->state;
     }
 
@@ -320,13 +326,31 @@ static void trackpoint_work_cb(struct k_work *work) {
     }
 
     last_activity_time = now;
+    /* Drain the packet, but emit no pointer, wheel or arrow events before hold. */
+#if IS_ENABLED(CONFIG_ZITAOTECH_TRACKPOINT_CONTROL)
+    bool hold_pending = zitaotech_trackpoint_scroll_key_pending();
+#else
+    bool hold_pending = scroll_key_pressed &&
+        (uint32_t)(k_uptime_get_32() - scroll_key_pressed_at) < 250;
+#endif
+    if (hold_pending) {
+        data->scroll_accum_x = data->scroll_accum_y = 0;
+        data->last_scroll_time = 0;
+        data->last_scroll_mode = false;
+        data->last_packet_time = now;
+        reset_arrow_motion();
+        return;
+    }
 
     /* ========= scroll mode 切换检测 ========= */
     bool capslock = current_indicators & HID_INDICATORS_CAPS_LOCK;
-    bool scroll_mode = scroll_key_pressed || (capslock && trackpoint_capslock_scroll_enabled());
+    bool scroll_mode = capslock && trackpoint_capslock_scroll_enabled();
 #if IS_ENABLED(CONFIG_ZITAOTECH_TRACKPOINT_CONTROL)
     /* A key on the central half reaches this one over the split relay. */
     scroll_mode = scroll_mode || zitaotech_trackpoint_scroll_key_pressed();
+#else
+    scroll_mode = scroll_mode || (scroll_key_pressed &&
+        (uint32_t)(k_uptime_get_32() - scroll_key_pressed_at) >= 250);
 #endif
 
     if (scroll_mode && !data->last_scroll_mode) {

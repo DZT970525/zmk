@@ -10,6 +10,10 @@
 #include <zephyr/device.h>
 #include <zephyr/input/input.h>
 #include <drivers/input_processor.h>
+#include <zmk/split/role.h>
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RUNTIME_ROLE) || IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+#include <zmk/split/peripheral.h>
+#endif
 
 #include <zephyr/logging/log.h>
 
@@ -100,7 +104,37 @@ int zmk_input_split_peripheral_disconnected(uint8_t reg) {
     return -ENODEV;
 }
 
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RUNTIME_ROLE) || IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+/* A hybrid left has both a physical input and a central proxy. Route the raw
+ * event once; only the central proxy runs the host's DPI/mode processors. */
+static void hybrid_input_handler(uint8_t reg, struct input_event *evt) {
+    if (zmk_split_role_is_central()) {
+        zmk_input_split_report_peripheral_event(reg, evt->type, evt->code, evt->value, evt->sync);
+        return;
+    }
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RUNTIME_ROLE)
+    struct zmk_split_transport_peripheral_event ev = {
+        .type = ZMK_SPLIT_TRANSPORT_PERIPHERAL_EVENT_TYPE_INPUT_EVENT,
+        .data = {.input_event = {.reg = reg, .type = evt->type, .code = evt->code,
+                                 .value = evt->value, .sync = evt->sync}}};
+    zmk_split_peripheral_report_event(&ev);
+#endif
+}
+#define ZIS_LOCAL_INPUT(n)                                                                         \
+    static void hybrid_input_handler_##n(struct input_event *evt, void *user_data) {                \
+        ARG_UNUSED(user_data);                                                                    \
+        hybrid_input_handler(DT_INST_REG_ADDR(n), evt);                                            \
+    }                                                                                             \
+    INPUT_CALLBACK_DEFINE(DEVICE_DT_GET(DT_INST_PHANDLE(n, device)),                                \
+                          hybrid_input_handler_##n, NULL);
+#define ZIS_HYBRID_INPUT(n)                                                                        \
+    COND_CODE_1(DT_INST_NODE_HAS_PROP(n, device), (ZIS_LOCAL_INPUT(n)), ())
+#else
+#define ZIS_HYBRID_INPUT(n)
+#endif
+
 #define ZIS_INST(n)                                                                                \
+    ZIS_HYBRID_INPUT(n)                                                                            \
     DEVICE_DT_INST_DEFINE(n, NULL, NULL, NULL, NULL, POST_KERNEL,                                  \
                           CONFIG_ZMK_INPUT_SPLIT_INIT_PRIORITY, NULL);
 

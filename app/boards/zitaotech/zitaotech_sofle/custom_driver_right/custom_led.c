@@ -1,8 +1,6 @@
 /*
- * custom_led_backlight_follow.c
- * LED immediately follows backlight brightness (never 0, min 10),
- * but fades out 3s after boot or brightness change (timeout allows 0),
- * and fades in when brightness becomes nonzero again.
+ * custom_led_trackpoint_dpi.c
+ * Show boot brightness and explicit TrackPoint DPI adjustments.
  */
 
 #include <zephyr/kernel.h>
@@ -10,7 +8,13 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/led.h>
 #include <zephyr/logging/log.h>
-#include <zmk/backlight.h>
+#include <zephyr/sys/atomic.h>
+
+#include "custom_led.h"
+#include "pointing_dpi.h"
+#if IS_ENABLED(CONFIG_ZITAOTECH_TRACKPOINT_CONTROL)
+#include <zitaotech/zmk/trackpoint.h>
+#endif
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -31,13 +35,17 @@ static const struct device *const led_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_custom_l
 #define FADE_STEPS 20
 
 static struct k_work_delayable auto_off_work;
-static struct k_work_delayable poll_work;
 static struct k_work_delayable fade_work;
+static struct k_work dpi_changed_work;
+static atomic_t indicator_ready;
 
-static uint8_t last_brt = 255;
 static uint8_t current_brt = 0;
 static uint8_t target_brt = 0;
-static int fade_step = -1; // -1 = idle
+static uint8_t fade_start_brt = 0;
+static int fade_step = -1;
+
+/* ★ 对外状态：最近一次有效亮度 */
+static uint8_t last_valid_brt = BRT_MIN;
 
 /* === Immediate apply LED === */
 static void apply_led(uint8_t brightness) {
@@ -56,24 +64,23 @@ static void fade_handler(struct k_work *work) {
         return;
 
     float ratio = (float)fade_step / FADE_STEPS;
-    int new_level = current_brt + (int)((target_brt - current_brt) * ratio);
+    int new_level = fade_start_brt + (int)((target_brt - fade_start_brt) * ratio);
 
     apply_led(new_level);
 
     fade_step++;
     if (fade_step > FADE_STEPS) {
-        // finish fade
         apply_led(target_brt);
         fade_step = -1;
         return;
     }
 
-    // 🔥 关键点：继续下一帧（否则不会渐隐！！！）
     k_work_reschedule(&fade_work, K_MSEC(FADE_STEP_MS));
 }
 
 /* === Start fade === */
 static void fade_to(uint8_t new_brt) {
+    fade_start_brt = current_brt;
     target_brt = new_brt;
     fade_step = 0;
     k_work_reschedule(&fade_work, K_MSEC(FADE_STEP_MS));
@@ -85,34 +92,51 @@ static void auto_off_handler(struct k_work *work) {
     fade_to(0);
 }
 
-/* === Poll backlight changes every 10ms === */
-static void poll_handler(struct k_work *work) {
-    uint8_t brt = zmk_backlight_get_brt();
+static void dpi_changed_work_handler(struct k_work *work) {
+    ARG_UNUSED(work);
 
-    if (brt != last_brt) {
-        last_brt = brt;
+    uint8_t led_level = MAX(BRT_MIN, sofle_trackpoint_dpi_get());
+    last_valid_brt = led_level;
 
-        uint8_t led_level = (brt == 0) ? 0 : MAX(BRT_MIN, brt);
-
-        if (led_level == 0) {
-            /* Restart auto-off */
-            k_work_cancel_delayable(&auto_off_work);
-            k_work_reschedule(&auto_off_work, K_MSEC(OFF_DELAY_MS));
-        } else {
-            if (current_brt == 0) {
-                LOG_INF("Fade-in from dark → %d", led_level);
-                fade_to(led_level);
-            } else {
-                apply_led(led_level);
-            }
-
-            k_work_cancel_delayable(&auto_off_work);
-            k_work_reschedule(&auto_off_work, K_MSEC(OFF_DELAY_MS));
-        }
+    if (current_brt == 0) {
+        LOG_INF("TrackPoint DPI LED fade-in to %d", led_level);
+        fade_to(led_level);
+    } else {
+        k_work_cancel_delayable(&fade_work);
+        fade_step = -1;
+        apply_led(led_level);
     }
 
-    k_work_reschedule(&poll_work, K_MSEC(10));
+    k_work_reschedule(&auto_off_work, K_MSEC(OFF_DELAY_MS));
 }
+
+/* === Public API === */
+uint8_t custom_led_get_last_valid_brightness(void) { return last_valid_brt; }
+
+void sofle_trackpoint_dpi_changed(void) {
+    if (atomic_get(&indicator_ready)) {
+        k_work_submit(&dpi_changed_work);
+    }
+}
+
+#if IS_ENABLED(CONFIG_ZITAOTECH_TRACKPOINT_CONTROL)
+
+/*
+ * The TrackPoint module owns the DPI value now, and it is the half that gets
+ * told when Studio or the &DPI keys change it (directly or over the split
+ * relay), so follow its event instead of only the local driver.
+ */
+static int trackpoint_dpi_listener(const zmk_event_t *eh) {
+    if (as_zitaotech_trackpoint_dpi_changed(eh) != NULL) {
+        sofle_trackpoint_dpi_changed();
+    }
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(custom_led_trackpoint_dpi, trackpoint_dpi_listener);
+ZMK_SUBSCRIPTION(custom_led_trackpoint_dpi, zitaotech_trackpoint_dpi_changed);
+
+#endif // IS_ENABLED(CONFIG_ZITAOTECH_TRACKPOINT_CONTROL)
 
 /* === Init === */
 static int init_led_follow(void) {
@@ -120,18 +144,17 @@ static int init_led_follow(void) {
         return -ENODEV;
 
     k_work_init_delayable(&auto_off_work, auto_off_handler);
-    k_work_init_delayable(&poll_work, poll_handler);
     k_work_init_delayable(&fade_work, fade_handler);
+    k_work_init(&dpi_changed_work, dpi_changed_work_handler);
 
-    uint8_t boot = zmk_backlight_get_brt();
-    uint8_t led_level = (boot == 0) ? 0 : MAX(BRT_MIN, boot);
+    uint8_t led_level = MAX(BRT_MIN, sofle_trackpoint_dpi_get());
+    last_valid_brt = led_level;
 
     apply_led(led_level);
-
+    atomic_set(&indicator_ready, 1);
     k_work_reschedule(&auto_off_work, K_MSEC(OFF_DELAY_MS));
-    k_work_reschedule(&poll_work, K_NO_WAIT);
 
-    LOG_INF("LED backlight follow + fade driver initialized");
+    LOG_INF("TrackPoint DPI LED initialized at %d", led_level);
     return 0;
 }
 

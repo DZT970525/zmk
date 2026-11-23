@@ -11,41 +11,29 @@
 LV_IMAGE_DECLARE(bolt);
 
 void rotate_canvas(lv_obj_t *canvas, uint16_t cbuf[]) {
-    /*
-     * Orientation that has been verified on this panel: draw the canvas buffer
-     * back into itself through the draw image path with a -90 degree rotation
-     * (the LVGL 8 code did the same with lv_canvas_transform()).
-     */
-    static uint16_t cbuf_tmp[CANVAS_SIZE * CANVAS_SIZE];
-    memcpy(cbuf_tmp, cbuf, sizeof(cbuf_tmp));
-
-    lv_image_dsc_t img;
-    memset(&img, 0, sizeof(img));
-    img.header.magic = LV_IMAGE_HEADER_MAGIC;
-    img.header.cf = LV_COLOR_FORMAT_NATIVE;
-    img.header.w = CANVAS_SIZE;
-    img.header.h = CANVAS_SIZE;
-    img.data = (void *)cbuf_tmp;
-    img.data_size = sizeof(cbuf_tmp);
-
-    lv_layer_t layer;
-    lv_canvas_init_layer(canvas, &layer);
-
-    lv_draw_image_dsc_t img_dsc;
-    lv_draw_image_dsc_init(&img_dsc);
-    img_dsc.src = &img;
-    img_dsc.rotation = -900;
-    img_dsc.pivot.x = CANVAS_SIZE / 2;
-    img_dsc.pivot.y = CANVAS_SIZE / 2 - 1;
-
-    lv_area_t area = {0, 0, CANVAS_SIZE - 1, CANVAS_SIZE - 1};
-    lv_draw_image(&layer, &img_dsc, &area);
-
-    lv_canvas_finish_layer(canvas, &layer);
-
+    const int n = CANVAS_SIZE;
+    /* Preserve the uncovered first column of the old -90 degree transform.
+     * Its pivot (n/2,n/2-1) places the rotated image one pixel to the right. */
+    uint16_t left_edge[CANVAS_SIZE];
+    for (int y=0; y<n; y++) left_edge[y]=cbuf[y*n];
+    /* Counterclockwise rotation, swapping four pixels at a time. */
+    for (int ring=0; ring<n/2; ring++) {
+        int end=n-1-ring;
+        for (int x=ring; x<end; x++) {
+            int offset=x-ring;
+            uint16_t top=cbuf[ring*n+x];
+            cbuf[ring*n+x]=cbuf[x*n+end];
+            cbuf[x*n+end]=cbuf[end*n+end-offset];
+            cbuf[end*n+end-offset]=cbuf[(end-offset)*n+ring];
+            cbuf[(end-offset)*n+ring]=top;
+        }
+    }
+    for (int y=0; y<n; y++) {
+        memmove(cbuf+y*n+1,cbuf+y*n,(n-1)*sizeof(uint16_t));
+        cbuf[y*n]=left_edge[y];
+    }
     lv_obj_invalidate(canvas);
 }
-
 void draw_battery(lv_obj_t *canvas, const struct status_state *state) {
     /* At least one pixel of charge so that a nearly empty battery is still visible */
     uint8_t charge = (state->battery + 2) / 4;

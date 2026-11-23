@@ -1,2 +1,2 @@
-zitaotech.trackpad.State.driver_name max_size:16
+zitaotech.trackpad.State.driver_name max_size:32
 zitaotech.trackpad.Error.message max_size:96

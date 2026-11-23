@@ -1,0 +1,31 @@
+/* Shared optional Studio behaviors for Q10, Q20 and BBP9981. */
+#define ZMK_BEHAVIORS_KEEP_LT
+#define ZMK_BEHAVIORS_KEEP_KT
+#define ZMK_BEHAVIORS_KEEP_TOG
+#define ZMK_BEHAVIORS_KEEP_CAPS_WORD
+#define ZMK_BEHAVIORS_KEEP_KEY_REPEAT
+#define ZMK_BEHAVIORS_KEEP_GRESC
+
+#include <behaviors.dtsi>
+#include <behaviors/layer_mod.dtsi>
+#include <behaviors/mouse_key_toggle.dtsi>
+
+/* Match Sofle's layer-tap timing while retaining the standard Studio name. */
+&lt {
+    flavor = "hold-preferred";
+    tapping-term-ms = <400>;
+};
+
+/ {
+    behaviors {
+        /* Avoid the special Sofle mouse_lt override: this version uses MO. */
+        small_mouse_lt: small_mouse_layer_tap {
+            compatible = "zmk,behavior-hold-tap";
+            #binding-cells = <2>;
+            flavor = "tap-preferred";
+            tapping-term-ms = <250>;
+            bindings = <&mo>, <&mkp>;
+            display-name = "Mouse Layer Tap";
+        };
+    };
+};

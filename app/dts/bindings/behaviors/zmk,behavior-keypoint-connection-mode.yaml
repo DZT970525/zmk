@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Runs on the physical key source; enabled only by LEFT's saved permission.
+description: Switch Keypoint between dongle and standalone connection modes
+compatible: "zmk,behavior-keypoint-connection-mode"
+include: zero_param.yaml

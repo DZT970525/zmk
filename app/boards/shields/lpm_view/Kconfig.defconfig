@@ -2,6 +2,11 @@
 # SPDX-License-Identifier: MIT
 
 if SHIELD_LPM_VIEW
+
+# Twenty RGB111 pictures require 86,400 bytes plus NVS metadata/GC headroom.
+config SETTINGS_NVS_SECTOR_COUNT
+    default 32 if ZMK_SPLIT && !ZMK_SPLIT_ROLE_CENTRAL
+
 config LV_Z_VDB_SIZE
     default 50
 

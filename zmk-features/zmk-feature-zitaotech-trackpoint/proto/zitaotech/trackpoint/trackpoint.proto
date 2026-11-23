@@ -73,7 +73,23 @@ message SetSmoothScrollRequest {
   bool enabled = 1;
 }
 
+// Whole curve is validated and applied atomically. Values are hundredths.
+message SetPointerCurveRequest {
+  bool enabled = 1;
+  uint32 vmax = 2;
+  uint32 exponent = 3;
+  uint32 minimum = 4;
+  uint32 maximum = 5;
+}
+
 message ResetRequest {
+}
+
+message SetReleaseDecayRequest {
+  uint32 value = 1;
+}
+message SetRiseRateRequest {
+  uint32 value = 1;
 }
 
 message Request {
@@ -90,6 +106,9 @@ message Request {
     SetModeKeyRequest set_mode_key = 10;
     SetArrowThresholdRequest set_arrow_threshold = 11;
     SetSmoothScrollRequest set_smooth_scroll = 12;
+    SetPointerCurveRequest set_pointer_curve = 13;
+    SetReleaseDecayRequest set_release_decay = 14;
+    SetRiseRateRequest set_rise_rate = 15;
   }
 }
 
@@ -137,6 +156,19 @@ message State {
   uint32 arrow_swipe_max = 39;
   bool smooth_scroll_enabled = 40;
   bool smooth_scroll_supported = 41;
+  bool curve_supported = 42;
+  bool curve_enabled = 43;
+  uint32 curve_vmax = 44;
+  uint32 curve_exponent = 45;
+  uint32 curve_minimum = 46;
+  uint32 curve_maximum = 47;
+  optional int32 fast_scroll_key = 48;
+  bool fast_scroll_supported = 49;
+  bool release_decay_supported = 50;
+  uint32 release_decay = 51;
+  bool rise_rate_supported = 52;
+  uint32 rise_rate = 53;
+
 }
 
 message Ok {

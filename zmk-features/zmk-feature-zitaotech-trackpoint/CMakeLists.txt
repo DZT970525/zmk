@@ -2,6 +2,9 @@ zephyr_include_directories(include)
 
 if(CONFIG_ZITAOTECH_TRACKPOINT_CONTROL)
     target_sources(app PRIVATE src/trackpoint.c)
+    if(CONFIG_ZITAOTECH_TRACKPOINT_VELOCITY_CURVE)
+        target_sources(app PRIVATE src/pointer_curve.c)
+    endif()
 
     if(CONFIG_ZITAOTECH_TRACKPOINT_CONTROL_STUDIO_RPC)
         target_sources(app PRIVATE src/studio/trackpoint_handler.c)

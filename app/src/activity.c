@@ -124,6 +124,13 @@ SETTINGS_STATIC_HANDLER_DEFINE(activity, "activity", NULL, activity_settings_set
 #endif // IS_ENABLED(CONFIG_SETTINGS)
 
 bool zmk_activity_set_idle_ms(uint32_t idle_ms) {
+#if IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q10) || IS_ENABLED(CONFIG_BOARD_BBP9981) || \
+    IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q20) || IS_ENABLED(CONFIG_BOARD_P9981)
+    /* Studio exposes whole seconds, with zero meaning always on. */
+    if (idle_ms != 0 && (idle_ms < 1000 || idle_ms > 6000000 || idle_ms % 1000 != 0)) {
+        return false;
+    }
+#endif
     k_spinlock_key_t key = k_spin_lock(&activity_timeout_lock);
     max_idle_ms = idle_ms;
     k_spin_unlock(&activity_timeout_lock, key);
@@ -169,7 +176,9 @@ int set_state(enum zmk_activity_state state) {
 
 enum zmk_activity_state zmk_activity_get_state(void) { return activity_state; }
 
+__weak void receiver_screen_note_input(void) {}
 static int note_activity(void) {
+    receiver_screen_note_input();
     activity_last_uptime = k_uptime_get();
 
     return set_state(ZMK_ACTIVITY_ACTIVE);

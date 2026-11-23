@@ -18,6 +18,8 @@
 
 #include <zitaotech/trackpad/trackpad.pb.h>
 #include <zitaotech/zmk/trackpad.h>
+#include <zitaotech/zmk/trackpad_curve.h>
+#include <zmk/pointing/temp_layer.h>
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
@@ -68,6 +70,14 @@ static int trackpad_subsystem_index(void) {
 
 static void fill_state(zitaotech_trackpad_State *out) {
     out->supported = true;
+    out->pointer_curve_supported = zitaotech_trackpad_curve_supported();
+    out->has_pointer_curve = out->pointer_curve_supported;
+    if (out->has_pointer_curve) {
+        struct zitaotech_trackpad_curve c;
+        zitaotech_trackpad_curve_get(&c);
+        out->pointer_curve = (zitaotech_trackpad_PointerCurve){c.enabled, c.minimum,
+            c.maximum, c.exponent, c.vmax, c.ramp_ms, c.ramp_counts, c.idle_ms, c.smoothing};
+    }
     strncpy(out->driver_name, CONFIG_ZITAOTECH_TRACKPAD_DRIVER_NAME, sizeof(out->driver_name) - 1);
     out->dpi_index = zitaotech_trackpad_dpi_index();
     out->dpi_value = zitaotech_trackpad_dpi_value();
@@ -85,11 +95,18 @@ static void fill_state(zitaotech_trackpad_State *out) {
     out->burst_multiplier_max = CONFIG_ZITAOTECH_TRACKPAD_BURST_MAX;
     /* mode_keys is a submessage: without has_mode_keys nanopb omits it from the
      * wire format entirely, which made every mode key look unassigned. */
+    out->fast_scroll_supported = IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) ||
+                                 (IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q10) || (IS_ENABLED(CONFIG_BOARD_BBP9981) || IS_ENABLED(CONFIG_BOARD_ZITAOTECH_Q20)));
+    out->mouse_layer_overlay_supported = IS_ENABLED(CONFIG_ZMK_INPUT_PROCESSOR_TEMP_LAYER_PRIORITY);
+    out->mouse_layer_overlay_enabled = zmk_input_processor_temp_layer_overlay_enabled();
     out->has_mode_keys = true;
+    out->mode_keys.has_fast_scroll_key = true;
+    out->mode_keys.fast_scroll_key = zitaotech_trackpad_fast_scroll_key_position();
     out->mode_keys.arrow_key = zitaotech_trackpad_arrow_key_position();
     out->mode_keys.fast_key = zitaotech_trackpad_fast_key_position();
     out->mode_keys.slow_key = zitaotech_trackpad_slow_key_position();
     out->mode_keys.scroll_key = zitaotech_trackpad_scroll_key_position();
+
     out->smooth_scroll_enabled = zitaotech_trackpad_smooth_scroll_enabled();
     out->arrow_swipe_threshold = zitaotech_trackpad_arrow_swipe_threshold();
     out->arrow_swipe_threshold_min = CONFIG_ZITAOTECH_TRACKPAD_ARROW_SWIPE_MIN;
@@ -207,6 +224,8 @@ static bool zitaotech_trackpad_rpc_handle_request(const zmk_custom_CallRequest *
             keys->fast_key,
             keys->slow_key,
             keys->scroll_key,
+            keys->has_fast_scroll_key ? keys->fast_scroll_key : zitaotech_trackpad_fast_scroll_key_position(),
+
         };
         int rc = zitaotech_trackpad_set_mode_keys(positions);
         if (rc < 0) {
@@ -274,7 +293,26 @@ static bool zitaotech_trackpad_rpc_handle_request(const zmk_custom_CallRequest *
         }
         break;
     }
+    case zitaotech_trackpad_Request_set_pointer_curve_tag: {
+        const zitaotech_trackpad_PointerCurve *p = &req.request_type.set_pointer_curve;
+        struct zitaotech_trackpad_curve c = {p->enabled, p->minimum, p->maximum,
+            p->exponent, p->vmax, p->ramp_ms, p->ramp_counts, p->idle_ms, p->smoothing};
+        if (zitaotech_trackpad_curve_set(&c) < 0) {
+            zitaotech_trackpad_suppress_notifications(false);
+            fill_error(resp, "Pointer curve unsupported or out of range");
+            return true;
+        }
+        break;
+    }
+    case zitaotech_trackpad_Request_set_mouse_layer_overlay_tag:
+        if (zmk_input_processor_temp_layer_set_overlay(req.request_type.set_mouse_layer_overlay.enabled) < 0) {
+            zitaotech_trackpad_suppress_notifications(false);
+            fill_error(resp, "Mouse layer overlay unavailable or save failed");
+            return true;
+        }
+        break;
     case zitaotech_trackpad_Request_reset_tag:
+        zitaotech_trackpad_curve_reset();
         zitaotech_trackpad_reset();
         break;
     default:

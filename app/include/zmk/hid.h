@@ -356,6 +356,7 @@ int zmk_hid_masked_modifiers_clear(void);
 int zmk_hid_keyboard_press(zmk_key_t key);
 int zmk_hid_keyboard_release(zmk_key_t key);
 void zmk_hid_keyboard_clear(void);
+void zmk_hid_modifiers_reset(void);
 bool zmk_hid_keyboard_is_pressed(zmk_key_t key);
 
 int zmk_hid_consumer_press(zmk_key_t key);

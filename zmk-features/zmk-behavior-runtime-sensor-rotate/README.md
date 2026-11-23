@@ -53,6 +53,13 @@ CONFIG_SETTINGS=y
 
 In your `<keyboard>.keymap`, define a runtime sensor rotate behavior instance:
 
+Every layer that should accept Studio rotary settings needs a `sensor-bindings`
+entry for each encoder. Use `<&rsr_trans &rsr_trans>` when that layer has no
+factory override. Without an entry, ZMK skips the runtime handler for that
+layer even if its rotary settings were saved successfully. Include the same
+entry in reserved layer slots when Studio can activate them later; keep their
+`status = "reserved"` so they remain available for adding layers.
+
 ```dts
 #include <behaviors/runtime-sensor-rotate.dtsi>
 

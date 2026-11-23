@@ -11,6 +11,7 @@
 #include <zmk/keys.h>
 #include <zephyr/logging/log.h>
 #include <zmk/behavior.h>
+#include <zmk/configurable_mod_tap.h>
 #include <zmk/matrix.h>
 #include <zmk/endpoints.h>
 #include <zmk/event_manager.h>
@@ -84,6 +85,7 @@ struct active_hold_tap {
     int64_t timestamp;
     enum status status;
     const struct behavior_hold_tap_config *config;
+    uint32_t tapping_term_ms;
     struct k_work_delayable work;
     bool work_is_cancelled;
     bool scroll_consumed;
@@ -253,13 +255,24 @@ static void release_captured_events() {
             LOG_DBG("Releasing mods changed event 0x%02X %s",
                     captured_event->data.keycode.data.keycode,
                     (captured_event->data.keycode.data.state ? "pressed" : "released"));
+#if IS_ENABLED(CONFIG_ZMK_RUNTIME_TAP_DANCE)
+            /* Runtime tap dance precedes this listener and may now be undecided. */
+            extern const struct zmk_listener zmk_listener_runtime_tap_dance;
+            ZMK_EVENT_RAISE_AT(captured_event->data.keycode, runtime_tap_dance);
+#else
             ZMK_EVENT_RAISE_AT(captured_event->data.keycode, behavior_hold_tap);
+#endif
             break;
         case ET_POS_CHANGED:
             LOG_DBG("Releasing key position event for position %d %s",
                     captured_event->data.position.data.position,
                     (captured_event->data.position.data.state ? "pressed" : "released"));
+#if IS_ENABLED(CONFIG_ZMK_RUNTIME_TAP_DANCE)
+            extern const struct zmk_listener zmk_listener_runtime_tap_dance;
+            ZMK_EVENT_RAISE_AT(captured_event->data.position, runtime_tap_dance);
+#else
             ZMK_EVENT_RAISE_AT(captured_event->data.position, behavior_hold_tap);
+#endif
             break;
         default:
             LOG_ERR("Unhandled captured event type");
@@ -290,6 +303,7 @@ static struct active_hold_tap *store_hold_tap(struct zmk_behavior_binding_event 
 #endif
         active_hold_taps[i].status = STATUS_UNDECIDED;
         active_hold_taps[i].config = config;
+        active_hold_taps[i].tapping_term_ms = config->tapping_term_ms;
 
         active_hold_taps[i].param_hold = param_hold;
         active_hold_taps[i].param_tap = param_tap;
@@ -643,6 +657,19 @@ static int on_hold_tap_binding_pressed(struct zmk_behavior_binding *binding,
     const struct device *dev = zmk_behavior_get_binding(binding->behavior_dev);
     const struct behavior_hold_tap_config *cfg = dev->config;
 
+    uint32_t hold_param = binding->param1;
+    uint32_t tapping_term_ms = cfg->tapping_term_ms;
+#if DT_NODE_EXISTS(DT_NODELABEL(configurable_mt))
+    if (dev == DEVICE_DT_GET(DT_NODELABEL(configurable_mt))) {
+        if (!zmk_configurable_mt_term_valid(hold_param)) {
+            LOG_WRN("Invalid configurable Mod-Tap timeout");
+            return ZMK_BEHAVIOR_OPAQUE;
+        }
+        tapping_term_ms = zmk_configurable_mt_term(hold_param);
+        hold_param = zmk_configurable_mt_hold(hold_param);
+    }
+#endif
+
     if (undecided_hold_tap != NULL) {
         LOG_DBG("ERROR another hold-tap behavior is undecided.");
         // if this happens, make sure the behavior events occur AFTER other position events.
@@ -650,13 +677,15 @@ static int on_hold_tap_binding_pressed(struct zmk_behavior_binding *binding,
     }
 
     struct active_hold_tap *hold_tap =
-        store_hold_tap(&event, binding->param1, binding->param2, cfg);
+        store_hold_tap(&event, hold_param, binding->param2, cfg);
 
     if (hold_tap == NULL) {
         LOG_ERR("unable to store hold-tap info, did you press more than %d hold-taps?",
                 ZMK_BHV_HOLD_TAP_MAX_HELD);
         return ZMK_BEHAVIOR_OPAQUE;
     }
+
+    hold_tap->tapping_term_ms = tapping_term_ms;
 
     LOG_DBG("%d new undecided hold_tap", event.position);
     undecided_hold_tap = hold_tap;
@@ -669,7 +698,7 @@ static int on_hold_tap_binding_pressed(struct zmk_behavior_binding *binding,
 
     // if this behavior was queued we have to adjust the timer to only
     // wait for the remaining time.
-    int32_t tapping_term_ms_left = (hold_tap->timestamp + cfg->tapping_term_ms) - k_uptime_get();
+    int32_t tapping_term_ms_left = (hold_tap->timestamp + hold_tap->tapping_term_ms) - k_uptime_get();
     k_work_schedule(&hold_tap->work, K_MSEC(tapping_term_ms_left));
 
     return ZMK_BEHAVIOR_OPAQUE;
@@ -686,7 +715,7 @@ static int on_hold_tap_binding_released(struct zmk_behavior_binding *binding,
     // If these events were queued, the timer event may be queued too late or not at all.
     // We insert a timer event before the TH_KEY_UP event to verify.
     int work_cancel_result = k_work_cancel_delayable(&hold_tap->work);
-    if (event.timestamp > (hold_tap->timestamp + hold_tap->config->tapping_term_ms)) {
+    if (event.timestamp > (hold_tap->timestamp + hold_tap->tapping_term_ms)) {
         decide_hold_tap(hold_tap, HT_TIMER_EVENT);
     }
 
@@ -793,7 +822,7 @@ static int position_state_changed_listener(const zmk_event_t *eh) {
     // We make a timer decision before the other key events are handled if the timer would
     // have run out.
     if (ev->timestamp >
-        (undecided_hold_tap->timestamp + undecided_hold_tap->config->tapping_term_ms)) {
+        (undecided_hold_tap->timestamp + undecided_hold_tap->tapping_term_ms)) {
         decide_hold_tap(undecided_hold_tap, HT_TIMER_EVENT);
     }
 

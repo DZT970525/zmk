@@ -1,0 +1,15 @@
+config ZMK_RUNTIME_TAP_DANCE
+    bool "Runtime tap dance"
+    depends on !ZMK_SPLIT || ZMK_SPLIT_ROLE_CENTRAL
+    select ZMK_BEHAVIOR_LOCAL_IDS
+    select SETTINGS
+
+if ZMK_RUNTIME_TAP_DANCE
+config ZMK_RUNTIME_TAP_DANCE_COUNT
+    int "Runtime tap dance slots"
+    default 16
+    range 1 16
+config ZMK_RUNTIME_TAP_DANCE_STUDIO_RPC
+    bool "Runtime tap dance Studio configuration"
+    depends on ZMK_STUDIO
+endif

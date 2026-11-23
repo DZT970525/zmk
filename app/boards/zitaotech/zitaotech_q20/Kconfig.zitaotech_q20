@@ -18,6 +18,15 @@ config ZITAOTECH_Q20_VIAL_MATRIX
       minimum Vial/VIA protocol needed for Vial's matrix tester; dynamic
       keymap editing is intentionally not implemented.
 
+config ZITAOTECH_Q20_MOUSE_MAX_AGE_MS
+    int "Maximum age of queued BLE pointer motion in milliseconds"
+    depends on BOARD_ZITAOTECH_Q20 && ZMK_BLE && ZMK_POINTING && !ZITAOTECH_Q20_LEGACY_BLE
+    default 0
+    range 0 1000
+    help
+      When nonzero, discard stale relative X/Y motion in the BLE mouse queue.
+      Button and wheel fields are retained. Zero disables the filter.
+
 menu "A320 Trackpad Setting"
 
 config A320_TRACKPAD_SCROLL_INTERVAL

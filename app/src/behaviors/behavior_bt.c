@@ -17,6 +17,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/behavior.h>
 
 #include <zmk/ble.h>
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+#include <zmk/keypoint_relay.h>
+#endif
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
@@ -90,6 +93,15 @@ static const struct behavior_parameter_metadata metadata = {
 
 static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+    /* Slot commands belong to the endpoint currently receiving HID. */
+    if (zmk_keypoint_relay_routed() &&
+        (binding->param1 == BT_NXT_CMD || binding->param1 == BT_PRV_CMD ||
+         binding->param1 == BT_SEL_CMD)) {
+        const uint8_t command[] = {binding->param1, binding->param2};
+        return zmk_keypoint_relay_send(5, command, sizeof(command));
+    }
+#endif
     switch (binding->param1) {
     case BT_CLR_CMD:
         zmk_ble_clear_bonds();

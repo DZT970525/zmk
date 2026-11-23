@@ -76,7 +76,7 @@ config ZMK_SPLIT_BLE_PREF_TIMEOUT
 
 endif # ZMK_SPLIT_ROLE_CENTRAL
 
-if !ZMK_SPLIT_ROLE_CENTRAL
+if !ZMK_SPLIT_ROLE_CENTRAL || ZMK_SPLIT_DUAL_ROLE_BUILD
 
 config ZMK_SPLIT_BLE_PERIPHERAL_STACK_SIZE
     int "BLE split peripheral notify thread stack size"
@@ -110,6 +110,15 @@ config ZMK_INPUT_SPLIT_MSG_QUEUE_SIZE
     help
       Sets the maximum number of input split events that can be queued for BLE notifications.
       Increasing this reduces drops during high-rate input bursts at the cost of additional RAM.
+
+config ZMK_KEYPOINT_SPLIT_MOTION_MAX_AGE_MS
+    int "Maximum age for queued split pointer motion on KEYPOINT or SOFLE right"
+    depends on BOARD_ZITAOTECH_KEYPOINT_RIGHT || BOARD_SOFLE_DONGLE_RIGHT
+    range 0 1000
+    default 0
+    help
+      Drop stale relative pointer movement before BLE notification. A zero
+      value disables the age limit. Other input event types are not affected.
 
 endif # ZMK_INPUT_SPLIT
 

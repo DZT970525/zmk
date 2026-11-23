@@ -248,7 +248,14 @@ static int send_consumer_report(void) {
     return -ENOTSUP;
 }
 
+#include <zmk/split/role.h>
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+#include <zmk/keypoint_relay.h>
+#endif
 int zmk_endpoint_send_report(uint16_t usage_page) {
+    if (!zmk_keypoint_config_ready() || !zmk_split_role_is_central()) {
+        return 0;
+    }
     if (zitaotech_screen_transfer_active()) {
         zmk_hid_keyboard_clear();
         zmk_hid_consumer_clear();
@@ -256,9 +263,15 @@ int zmk_endpoint_send_report(uint16_t usage_page) {
     LOG_DBG("usage page 0x%02X", usage_page);
     switch (usage_page) {
     case HID_USAGE_KEY:
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+        if (zmk_keypoint_relay_routed()) return zmk_keypoint_relay_send(1,&zmk_hid_get_keyboard_report()->body,sizeof(struct zmk_hid_keyboard_report_body));
+#endif
         return send_keyboard_report();
 
     case HID_USAGE_CONSUMER:
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+        if (zmk_keypoint_relay_routed()) return zmk_keypoint_relay_send(2,&zmk_hid_get_consumer_report()->body,sizeof(struct zmk_hid_consumer_report_body));
+#endif
         return send_consumer_report();
     }
 
@@ -268,7 +281,13 @@ int zmk_endpoint_send_report(uint16_t usage_page) {
 
 #if IS_ENABLED(CONFIG_ZMK_POINTING)
 int zmk_endpoint_send_mouse_report() {
+    if (!zmk_keypoint_config_ready() || !zmk_split_role_is_central()) {
+        return 0;
+    }
     if (zitaotech_screen_transfer_active()) zmk_hid_mouse_clear();
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+    if (zmk_keypoint_relay_routed()) return zmk_keypoint_relay_send(3,&zmk_hid_get_mouse_report()->body,sizeof(struct zmk_hid_mouse_report_body));
+#endif
     switch (current_instance.transport) {
     case ZMK_TRANSPORT_NONE:
         return 0;
@@ -421,7 +440,7 @@ static bool is_usb_ready(void) {
 
 static bool is_ble_ready(void) {
 #if IS_ENABLED(CONFIG_ZMK_BLE)
-    return zmk_ble_active_profile_is_connected();
+    return zmk_ble_host_is_enabled() && zmk_ble_active_profile_is_connected();
 #else
     return false;
 #endif
@@ -475,6 +494,7 @@ static int zmk_endpoints_init(void) {
 }
 
 void zmk_endpoint_clear_reports(void) {
+    zmk_hid_modifiers_reset();
     zmk_hid_keyboard_clear();
     zmk_hid_consumer_clear();
 #if IS_ENABLED(CONFIG_ZMK_POINTING)
@@ -516,4 +536,3 @@ ZMK_SUBSCRIPTION(endpoint_listener, zmk_ble_active_profile_changed);
 #endif
 
 SYS_INIT(zmk_endpoints_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
-

@@ -1,7 +1,7 @@
 zephyr_include_directories(include)
 
 if(CONFIG_ZITAOTECH_TRACKPAD_CONTROL)
-    target_sources(app PRIVATE src/trackpad.c)
+    target_sources(app PRIVATE src/trackpad.c src/trackpad_curve.c)
 
     if(CONFIG_ZITAOTECH_TRACKPAD_CONTROL_STUDIO_RPC)
         target_sources(app PRIVATE src/studio/trackpad_handler.c)

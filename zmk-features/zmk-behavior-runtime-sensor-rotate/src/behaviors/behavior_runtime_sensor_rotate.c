@@ -58,46 +58,46 @@ static struct behavior_runtime_sensor_rotate_data global_data = {};
 // TODO: The dimension order here is [layer][sensor]. Different from global_data which is
 // [sensor][layer].
 static const char *global_default_behavior_dev[ZMK_KEYMAP_LAYERS_LEN][ZMK_KEYMAP_SENSORS_LEN] = {
-    DT_FOREACH_CHILD_SEP(DT_INST(0, zmk_keymap), SENSOR_LAYER, (, ))};
+    ZMK_KEYMAP_LAYERS_FOREACH_SEP(SENSOR_LAYER, (, ))};
 #endif
 
 // Settings storage key
 #define SETTINGS_KEY "rsr"
 
+/* Parse only complete s<index>/l<layer> keys, without scanf or narrowing
+ * before checking bounds. The limit check also bounds decimal arithmetic. */
+static int parse_settings_index(const char **cursor, unsigned int limit, unsigned int *out) {
+    const char *p = *cursor;
+    if (*p < '0' || *p > '9') return -EINVAL;
+    unsigned int value = 0;
+    do {
+        unsigned int digit = (unsigned int)(*p - '0');
+        if (value >= limit || value > (UINT32_MAX - digit) / 10U) return -EINVAL;
+        value = value * 10U + digit;
+        if (value >= limit) return -EINVAL;
+        p++;
+    } while (*p >= '0' && *p <= '9');
+    *cursor = p;
+    *out = value;
+    return 0;
+}
+
 static int settings_set(const char *name, size_t len, settings_read_cb read_cb, void *cb_arg) {
-    int rc;
-    int sensor_index, layer;
-
-    // Parse key format: s<sensor_index>/l<layer>
-    // Example: "s0/l1" for sensor 0, layer 1
-    if (sscanf(name, "s%d/l%d", &sensor_index, &layer) == 2) {
-        if (sensor_index < 0 || sensor_index >= ZMK_RUNTIME_SENSOR_ROTATE_MAX_SENSORS) {
-            LOG_WRN("Invalid sensor index in settings: %d", sensor_index);
-            return -EINVAL;
-        }
-        if (layer < 0 || layer >= ZMK_RUNTIME_SENSOR_ROTATE_MAX_LAYERS) {
-            LOG_WRN("Invalid layer in settings: %d", layer);
-            return -EINVAL;
-        }
-
-        if (len != sizeof(struct runtime_sensor_rotate_layer_bindings)) {
-            LOG_ERR("Invalid settings data size for s%d/l%d: %d vs %d", sensor_index, layer, len,
-                    sizeof(struct runtime_sensor_rotate_layer_bindings));
-            return -EINVAL;
-        }
-
-        rc = read_cb(cb_arg, &global_data.bindings[sensor_index][layer],
-                     sizeof(struct runtime_sensor_rotate_layer_bindings));
-        if (rc < 0) {
-            LOG_ERR("Failed to read settings for s%d/l%d: %d", sensor_index, layer, rc);
-            return rc;
-        }
-
-        LOG_DBG("Loaded bindings for sensor %d layer %d", sensor_index, layer);
-        return 0;
-    }
-
-    return -ENOENT;
+    unsigned int sensor_index, layer;
+    const char *cursor = name;
+    if (*cursor++ != 's') return -ENOENT;
+    if (parse_settings_index(&cursor, ZMK_RUNTIME_SENSOR_ROTATE_MAX_SENSORS, &sensor_index))
+        return -EINVAL;
+    if (*cursor++ != '/') return -EINVAL;
+    if (*cursor++ != 'l') return -EINVAL;
+    if (parse_settings_index(&cursor, ZMK_RUNTIME_SENSOR_ROTATE_MAX_LAYERS, &layer) || *cursor)
+        return -EINVAL;
+    struct runtime_sensor_rotate_layer_bindings candidate;
+    if (len != sizeof(candidate)) return -EINVAL;
+    int rc = read_cb(cb_arg, &candidate, sizeof(candidate));
+    if (rc != sizeof(candidate)) return rc < 0 ? rc : -EINVAL;
+    global_data.bindings[sensor_index][layer] = candidate;
+    return 0;
 }
 
 SETTINGS_STATIC_HANDLER_DEFINE(behavior_runtime_sensor_rotate, SETTINGS_KEY, NULL, settings_set,
@@ -219,11 +219,13 @@ static int behavior_runtime_sensor_rotate_accept_data(
     const struct zmk_sensor_config *sensor_config, size_t channel_data_size,
     const struct zmk_sensor_channel_data *channel_data) {
 
+    int sensor_index = ZMK_SENSOR_POSITION_FROM_VIRTUAL_KEY_POSITION(event.position);
+    if (!sensor_config || !channel_data || channel_data_size == 0 ||
+        event.layer >= ZMK_RUNTIME_SENSOR_ROTATE_MAX_LAYERS) return -EINVAL;
     const struct sensor_value value = channel_data[0].value;
     int triggers;
-    int sensor_index = ZMK_SENSOR_POSITION_FROM_VIRTUAL_KEY_POSITION(event.position);
 
-    if (sensor_index >= ZMK_RUNTIME_SENSOR_ROTATE_MAX_SENSORS) {
+    if (sensor_index < 0 || sensor_index >= ZMK_RUNTIME_SENSOR_ROTATE_MAX_SENSORS) {
         LOG_ERR("Sensor index %d out of bounds", sensor_index);
         return -EINVAL;
     }
@@ -251,6 +253,8 @@ static int behavior_runtime_sensor_rotate_accept_data(
             remainder.val2 %= 1000000;
         }
 
+        if (sensor_config->triggers_per_rotation == 0 ||
+            sensor_config->triggers_per_rotation > 360) return -EINVAL;
         int trigger_degrees = 360 / sensor_config->triggers_per_rotation;
         triggers = remainder.val1 / trigger_degrees;
         remainder.val1 %= trigger_degrees;
@@ -273,7 +277,8 @@ static int behavior_runtime_sensor_rotate_process(struct zmk_behavior_binding *b
 
     const int sensor_index = ZMK_SENSOR_POSITION_FROM_VIRTUAL_KEY_POSITION(event.position);
 
-    if (sensor_index >= ZMK_RUNTIME_SENSOR_ROTATE_MAX_SENSORS) {
+    if (sensor_index < 0 || sensor_index >= ZMK_RUNTIME_SENSOR_ROTATE_MAX_SENSORS ||
+        event.layer >= ZMK_RUNTIME_SENSOR_ROTATE_MAX_LAYERS) {
         LOG_ERR("Sensor index %d out of bounds", sensor_index);
         return -EINVAL;
     }
@@ -372,11 +377,14 @@ static int behavior_runtime_sensor_rotate_process(struct zmk_behavior_binding *b
         triggers = -triggers;
     }
 
+    /* Split peripherals forward sensor data; only the central executes it. */
+#if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     for (int i = 0; i < triggers; i++) {
         zmk_behavior_queue_add(&event, triggered_binding, true, triggered_binding_data.tap_ms);
         zmk_behavior_queue_add(&event, triggered_binding, false, 0);
     }
 
+#endif
     return ZMK_BEHAVIOR_OPAQUE;
 }
 

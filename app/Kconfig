@@ -724,4 +724,51 @@ osource "$(ZMK_CONFIG)/boards/shields/*/Kconfig.shield"
 # This loads ZMK's sensible defaults
 rsource "Kconfig.defaults"
 
+config ZMK_DIAGNOSTIC_SKIP_BEHAVIOR_ID_SAVE
+    bool "Diagnostic: assign new behavior IDs in RAM without persisting them"
+    default n
+    help
+      Isolate upgrade-time behavior ID flash writes while retaining saved
+      configuration. Do not edit or save configuration with this test build.
+
+config ZMK_DIAGNOSTIC_SKIP_SETTINGS_LOAD
+    bool "Diagnostic: bypass saved configuration without erasing storage"
+    default n
+    help
+      Use compiled defaults for USB-only fault isolation. Do not connect
+      configuration tools or change settings while running this build.
+
 source "Kconfig.zephyr"
+
+config ZITAOTECH_Q20_LEGACY_BLE
+    bool "Use the legacy Q20 host pairing and connection policy"
+    depends on (BOARD_ZITAOTECH_Q20 || BOARD_ZITAOTECH_Q10 || BOARD_BBP9981) && ZMK_BLE
+    default n
+
+config ZITAOTECH_BBP9981_SOFLE_BLE
+    bool "Use Sofle host-side BLE connection policy on BBP9981"
+    depends on BOARD_BBP9981 && ZMK_BLE
+    default n
+
+config ZITAOTECH_BBP9981_UPSTREAM_BLE
+    bool "Build pinned ZMK upstream BLE and HOG for BBP9981/Q20/Q10/P9981"
+    depends on (BOARD_BBP9981 || BOARD_ZITAOTECH_Q20 || BOARD_ZITAOTECH_Q10 || BOARD_P9981) && ZMK_BLE
+    default n
+
+config ZITAOTECH_Q20_RECONNECT_RETRY
+    bool "Retry Q20/Q10/BBP9981/P9981 advertising when connection resources are busy"
+    depends on (BOARD_ZITAOTECH_Q20 || BOARD_ZITAOTECH_Q10 || BOARD_BBP9981 || BOARD_P9981) && ZITAOTECH_BBP9981_UPSTREAM_BLE
+    default n
+
+config ZITAOTECH_Q20_INDICATOR_PREEMPTIBLE
+    bool "Run Q20 touch indicator below Bluetooth and input threads"
+    depends on BOARD_ZITAOTECH_Q20
+    default n
+
+config ZMK_SOFLE_TEST_DISABLE_HOST_PARAM_TUNE
+    bool "Diagnostic: disable SOFLE host connection parameter requests"
+    depends on BOARD_SOFLE_DONGLE_LEFT && ZMK_BLE
+    default n
+    help
+      Keep the existing security process but avoid application-initiated host
+      connection parameter updates. Intended for reconnect comparisons.

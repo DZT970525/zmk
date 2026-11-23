@@ -1,0 +1,19 @@
+ht_decide: 0 decided hold-timer (balanced decision moment timer)
+kp_pressed: usage_page 0x07 keycode 0xE1 implicit_mods 0x00 explicit_mods 0x00
+kp_released: usage_page 0x07 keycode 0xE1 implicit_mods 0x00 explicit_mods 0x00
+ht_decide: 1 decided tap (balanced decision moment key-up)
+kp_pressed: usage_page 0x07 keycode 0x0D implicit_mods 0x00 explicit_mods 0x00
+kp_released: usage_page 0x07 keycode 0x0D implicit_mods 0x00 explicit_mods 0x00
+ht_decide: 1 decided hold-timer (balanced decision moment timer)
+kp_pressed: usage_page 0x07 keycode 0xE0 implicit_mods 0x00 explicit_mods 0x00
+kp_released: usage_page 0x07 keycode 0xE0 implicit_mods 0x00 explicit_mods 0x00
+ht_decide: 0 decided hold-interrupt (balanced decision moment other-key-up)
+kp_pressed: usage_page 0x07 keycode 0xE1 implicit_mods 0x00 explicit_mods 0x00
+kp_pressed: usage_page 0x07 keycode 0x07 implicit_mods 0x00 explicit_mods 0x00
+kp_released: usage_page 0x07 keycode 0x07 implicit_mods 0x00 explicit_mods 0x00
+kp_released: usage_page 0x07 keycode 0xE1 implicit_mods 0x00 explicit_mods 0x00
+ht_decide: 3 decided hold-interrupt (hold-preferred decision moment other-key-down)
+kp_pressed: usage_page 0x07 keycode 0xE2 implicit_mods 0x00 explicit_mods 0x00
+kp_pressed: usage_page 0x07 keycode 0x07 implicit_mods 0x00 explicit_mods 0x00
+kp_released: usage_page 0x07 keycode 0x07 implicit_mods 0x00 explicit_mods 0x00
+kp_released: usage_page 0x07 keycode 0xE2 implicit_mods 0x00 explicit_mods 0x00

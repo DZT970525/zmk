@@ -1,3 +1,8 @@
+config ZITAOTECH_TRACKPAD_POINTER_CURVE
+    bool "Paired touchpad pointer acceleration curve"
+    depends on ZITAOTECH_TRACKPAD_CONTROL
+    default y if BOARD_BBP9981
+
 config ZITAOTECH_TRACKPAD_CONTROL
     bool "ZitaoTech trackpad control (runtime DPI / scroll)"
     select SETTINGS
@@ -148,6 +153,15 @@ config ZITAOTECH_TRACKPAD_MOUSE_LAYER_CONTROL
       follows the touch time instead of the devicetree value. Temporary layers
       on other layer indices keep their devicetree behaviour.
 
+config ZITAOTECH_TRACKPAD_MOUSE_LAYER_ALL_LAYERS
+    bool "Studio-adjustable automatic mouse overlay on non-base layers"
+    depends on ZITAOTECH_TRACKPAD_MOUSE_LAYER_CONTROL
+    default y if BOARD_SOFLE_DONGLE_LEFT || BOARD_SOFLE_DONGLE || BOARD_ZITAOTECH_KEYPOINT_LEFT || BOARD_KEYPOINT_DONGLE_LEFT || BOARD_ZITAOTECH_Q10 || BOARD_BBP9981 || BOARD_ZITAOTECH_Q20
+    select ZMK_INPUT_PROCESSOR_TEMP_LAYER_PRIORITY
+    help
+      Expose an opt-in setting (factory off) that temporarily prioritizes the
+      mouse overlay without replacing the user's active layers.
+
 config ZITAOTECH_TRACKPAD_MOUSE_LAYER_EXIT_ON_KEY
     bool "Leave the automatic mouse layer when a normal key is pressed"
     default y
@@ -158,6 +172,12 @@ config ZITAOTECH_TRACKPAD_MOUSE_LAYER_EXIT_ON_KEY
       returns to the base layer.  Mouse buttons do not count - they are not
       keycodes - so dragging keeps the layer.  The layer comes back the next
       time the trackpad is touched, once the touch has ended.
+
+config ZITAOTECH_TRACKPAD_SMOOTH_SCROLL_DEFAULT
+    bool "Enable smooth scrolling by default"
+    default n
+    help
+      Factory and reset default. Saved user settings take precedence.
 
 config ZITAOTECH_TRACKPAD_SMOOTH_SCROLL_INTERVAL_MS
     int "Smooth-scrolling tick interval (ms)"

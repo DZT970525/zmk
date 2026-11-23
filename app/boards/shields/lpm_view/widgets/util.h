@@ -9,6 +9,9 @@
 #include <zmk/endpoints.h>
 
 #define CANVAS_SIZE 72
+/* Enlarged status canvas only; BLE/layer canvases remain 72 square. */
+#define STATUS_CANVAS_SIZE 80
+#define LAYER_CANVAS_HEIGHT 16
 
 #define LVGL_BACKGROUND                                                                            \
     IS_ENABLED(CONFIG_NICE_VIEW_WIDGET_INVERTED) ? lv_color_black() : lv_color_white()

@@ -36,7 +36,11 @@ LOG_MODULE_REGISTER(a320, CONFIG_A320_LOG_LEVEL);
 
 /* ========= ⭐ A320 专用 Work Queue ========= */
 #define A320_WORKQ_STACK_SIZE 2048
+#if (IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN))
+#define A320_WORKQ_PRIORITY 9
+#else
 #define A320_WORKQ_PRIORITY 5
+#endif
 
 /* ========= ⭐ NEW: I2C Mutex ========= */
 static struct k_mutex a320_i2c_mutex;
@@ -145,7 +149,9 @@ static inline int32_t trackpad_slow_key_position(void) {
 /* ========= Motion GPIO ========= */
 
 #define MOTION_GPIO_NODE DT_NODELABEL(gpio0)
+#ifndef MOTION_GPIO_PIN
 #define MOTION_GPIO_PIN 5
+#endif
 #define MOTION_GPIO_FLAGS (GPIO_ACTIVE_LOW | GPIO_PULL_UP)
 
 /* ========= A320 常量 ========= */
@@ -275,6 +281,9 @@ K_WORK_DEFINE(a320_arrow_tap_work, a320_arrow_tap_work_cb);
  * report so an arrow gesture never turns into text selection.
  */
 static void tap_arrow_without_shift(uint16_t usage) {
+#if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    zitaotech_trackpad_relay_arrow_tap(usage);
+#else
     if (zmk_hid_keyboard_is_pressed(usage)) {
         return;
     }
@@ -298,6 +307,7 @@ static void tap_arrow_without_shift(uint16_t usage) {
     if (press_err < 0 || release_err < 0) {
         LOG_DBG("Arrow report failed: press=%d release=%d", press_err, release_err);
     }
+#endif
 }
 
 static void a320_arrow_tap_work_cb(struct k_work *work) {
@@ -500,11 +510,11 @@ static inline void process_cm5_scroll(const struct device *dev, struct a320_data
     int abs_x = dx < 0 ? -dx : dx;
     int abs_y = dy < 0 ? -dy : dy;
     int abs_max = abs_x > abs_y ? abs_x : abs_y;
-    if (abs_max <= 2) { return; }
+    if (abs_max == 0 || (smooth && abs_max <= 2)) { return; }
     if (abs_max > 128) { abs_max = 128; }
     float t = (float)abs_max / 128.0f;
     /* Halve the base scroll rate, preserving the Studio percentage scale. */
-    int divisor = 2 * (int)(24 - 18 * t * t);
+    int divisor = (smooth ? 2 : 1) * (int)(24 - 18 * t * t);
     if (divisor < 1) { divisor = 1; }
     int precision = smooth ? 16 : 1;
     int32_t rx = (int32_t)data->scroll_residue_x + (int32_t)dx * precision;
@@ -512,8 +522,8 @@ static inline void process_cm5_scroll(const struct device *dev, struct a320_data
     int16_t out_x = rx / divisor;
     int16_t out_y = ry / divisor;
     // Consume exactly what was emitted; do not queue or count it a second time.
-    data->scroll_residue_x = ((rx - out_x * divisor) * 3) / 4;
-    data->scroll_residue_y = ((ry - out_y * divisor) * 3) / 4;
+    data->scroll_residue_x = smooth ? ((rx - out_x * divisor) * 3) / 4 : rx - out_x * divisor;
+    data->scroll_residue_y = smooth ? ((ry - out_y * divisor) * 3) / 4 : ry - out_y * divisor;
 #if IS_ENABLED(CONFIG_ZMK_POINTING_SMOOTH_SCROLLING)
     if (!smooth) { out_x *= 16; out_y *= 16; }
 #endif
@@ -570,7 +580,13 @@ static void a320_work_cb(struct k_work *work) {
     bool got_data = false;
     bool read_succeeded = false;
 
+#if (IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN))
+    /* Submit motion promptly instead of draining a continuously replenished
+     * sensor FIFO indefinitely. Continue the next batch on our own queue. */
+    for (int packets = 0; packets < 8; packets++) {
+#else
     while (1) {
+#endif
         int ret = data->read_packet(dev, &packet_dx, &packet_dy);
         if (ret != 0) {
             if (now - data->last_read_error_log >= 1000) {
@@ -598,11 +614,18 @@ static void a320_work_cb(struct k_work *work) {
      * edge-only interrupt cannot guarantee another read. Continue 0x37
      * sampling (or retry a failed read) while active, yielding between reads.
      */
-    if (data->detected_i2c_addr == A320_I2C_ADDR_37 || !read_succeeded) {
+    if ((IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN)) ||
+        data->detected_i2c_addr == A320_I2C_ADDR_37 || !read_succeeded) {
         const struct a320_config *cfg = dev->config;
         if (gpio_pin_get_dt(&cfg->motion_gpio) > 0) {
+#if (IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN))
+            k_work_reschedule_for_queue(&a320_workq, &data->motion_retry_work,
+                K_MSEC(!read_succeeded ? A320_READ_RETRY_MS :
+                    (data->detected_i2c_addr == A320_I2C_ADDR_37 ? A320_37_SAMPLE_MS : 1)));
+#else
             k_work_reschedule(&data->motion_retry_work,
                               K_MSEC(read_succeeded ? A320_37_SAMPLE_MS : A320_READ_RETRY_MS));
+#endif
         }
     }
 
@@ -620,6 +643,17 @@ static void a320_work_cb(struct k_work *work) {
 
     int16_t dx = total_dx;
     int16_t dy = total_dy;
+#if (IS_ENABLED(CONFIG_BOARD_KEYPOINT_DONGLE_LEFT) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN))
+    /* Dongle peripherals forward sensor deltas; only the central owns settings. */
+    if (data->detected_i2c_addr == A320_I2C_ADDR_37) {
+        apply_motion_average(data, &dx, &dy, now);
+    }
+    input_report_rel(dev, INPUT_REL_X, dx, false, K_NO_WAIT);
+    input_report_rel(dev, INPUT_REL_Y, dy, true, K_NO_WAIT);
+    touched = false;
+    data->last_packet_time = now;
+    return;
+#endif
 
     bool capslock = (zmk_hid_indicators_get_current_profile() & HID_INDICATORS_CAPS_LOCK) != 0;
 #if IS_ENABLED(CONFIG_ZITAOTECH_TRACKPAD_CONTROL)

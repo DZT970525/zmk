@@ -1,10 +1,10 @@
 zitaotech.screen.Error.message max_size:96
-zitaotech.screen.ImageListResponse.images max_count:8
+zitaotech.screen.ImageListResponse.images max_count:20
 # The Studio request frame is tiny (CONFIG_ZMK_STUDIO_RPC_RX_BUF_SIZE), so a
 # picture arrives in small chunks.
 zitaotech.screen.ImageWriteRequest.data max_size:16
 
 zitaotech.screen.ImageReadResponse.data max_size:64
-zitaotech.screen.SetConfigRequest.playback_order max_size:5
-zitaotech.screen.State.playback_order max_size:5
-zitaotech.screen.State.right_playback_order max_size:5
+zitaotech.screen.SetConfigRequest.playback_order max_size:18
+zitaotech.screen.State.playback_order max_size:18
+zitaotech.screen.State.right_playback_order max_size:18

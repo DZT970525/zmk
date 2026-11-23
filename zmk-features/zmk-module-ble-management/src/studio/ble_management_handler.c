@@ -41,6 +41,9 @@ struct profile_name_entry {
 
 // Profile names cache (in memory)
 #if IS_ENABLED(CONFIG_ZMK_BLE)
+BUILD_ASSERT(ZMK_BLE_PROFILE_COUNT <=
+             ARRAY_SIZE(((zmk_ble_management_GetProfilesResponse *)0)->profiles),
+             "BLE host profile count exceeds the Studio response capacity" );
 static struct profile_name_entry profile_names[ZMK_BLE_PROFILE_COUNT];
 #else
 static struct profile_name_entry

@@ -44,6 +44,8 @@ message ModeKeys {
   int32 fast_key = 2;
   int32 slow_key = 3;
   int32 scroll_key = 4;
+  optional int32 fast_scroll_key = 5;
+
 }
 
 message SetModeKeysRequest {
@@ -113,6 +115,19 @@ message SetScrollBurstRequest {
 message ResetRequest {
 }
 
+// Curve gains, exponent and velocity use hundredths; times use milliseconds.
+message PointerCurve {
+  bool enabled = 1;
+  uint32 minimum = 2;
+  uint32 maximum = 3;
+  uint32 exponent = 4;
+  uint32 vmax = 5;
+  uint32 ramp_ms = 6;
+  uint32 ramp_counts = 7;
+  uint32 idle_ms = 8;
+  uint32 smoothing = 9;
+}
+
 message Request {
   oneof request_type {
     GetStateRequest get_state = 1;
@@ -133,6 +148,8 @@ message Request {
     SetMouseLayerMsRequest set_mouse_layer_ms = 16;
     SetTrackpointMouseLayerRequest set_trackpoint_mouse_layer = 17;
     SetTrackpointMouseLayerMsRequest set_trackpoint_mouse_layer_ms = 18;
+    PointerCurve set_pointer_curve = 19;
+    SetMouseLayerRequest set_mouse_layer_overlay = 20;
   }
 }
 
@@ -181,6 +198,11 @@ message State {
   // Layer the automatic mouse layer lives on. Each board's keymap decides the
   // number (3 on the SOFLE), so the UI can name it correctly.
   uint32 mouse_layer = 37;
+  bool fast_scroll_supported = 38;
+  bool pointer_curve_supported = 39;
+  PointerCurve pointer_curve = 40;
+  bool mouse_layer_overlay_supported = 41;
+  bool mouse_layer_overlay_enabled = 42;
 }
 
 message Ok {

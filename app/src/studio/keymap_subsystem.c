@@ -540,3 +540,30 @@ ZMK_RPC_SUBSYSTEM_HANDLER(keymap, set_layer_props, ZMK_STUDIO_RPC_HANDLER_SECURE
 static int event_mapper(const zmk_event_t *eh, zmk_studio_Notification *n) { return 0; }
 
 ZMK_RPC_EVENT_MAPPER(keymap, event_mapper);
+
+#if IS_ENABLED(CONFIG_ZMK_KEYMAP_SETTINGS_STORAGE)
+#include <zmk/studio/custom.h>
+#include <zephyr/sys/byteorder.h>
+/* v1 request [version=1, operation=1]; response [version=1, signed errno LE32].
+ * This resets only the keymap storage namespace, never settings_erase(). */
+static uint8_t keymap_reset_reply[5];
+static bool encode_keymap_reset(pb_ostream_t *stream, const pb_field_t *field,
+                                void *const *arg) {
+    return pb_encode_tag_for_field(stream, field) &&
+           pb_encode_string(stream, keymap_reset_reply, sizeof(keymap_reset_reply));
+}
+static bool keymap_reset_call(const zmk_custom_CallRequest *req, pb_callback_t *out) {
+    int rc = -EINVAL;
+    if (req->payload.size == 2 && req->payload.bytes[0] == 1 && req->payload.bytes[1] == 1)
+        rc = zmk_keymap_reset_settings();
+    keymap_reset_reply[0] = 1;
+    sys_put_le32((uint32_t)rc, keymap_reset_reply + 1);
+    out->funcs.encode = encode_keymap_reset;
+    out->arg = NULL;
+    return true;
+}
+static struct zmk_rpc_custom_subsystem_meta keymap_reset_meta = {
+    .security = ZMK_STUDIO_RPC_HANDLER_SECURED,
+};
+ZMK_RPC_CUSTOM_SUBSYSTEM(zitaotech__keymap_reset, &keymap_reset_meta, keymap_reset_call);
+#endif

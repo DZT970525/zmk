@@ -12,6 +12,7 @@
 #include <zephyr/drivers/spi.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/pm/device.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/drivers/display.h>
 
 #include <zephyr/logging/log.h>
@@ -39,6 +40,7 @@ LOG_MODULE_REGISTER(display_lpm009m360a, CONFIG_DISPLAY_LOG_LEVEL);
 #define LPM009M360A_TRANSFER_CLOCKS 16
 
 struct lpm009m360a_data {
+    atomic_t hold_frame;
     /* Shadow of the panel pixel memory, one gate line after the other. */
     uint8_t buf[LPM009M360A_LINE_COUNT * LPM009M360A_MAX_LINE_BYTES];
     /* The shadow can only be trusted after it was written to the panel once. */
@@ -136,6 +138,7 @@ static int lpm009m360a_sleep(const struct device *dev) {
 
 static int lpm009m360a_reset_display(const struct device *dev) {
     struct lpm009m360a_data *data = dev->data;
+    if (atomic_get(&data->hold_frame)) return 0;
 
     LOG_DBG("Resetting display");
     lpm009m360a_transmit(dev, LPM009M360A_CMD_ALL_CLEAR, 0, NULL, 0);
@@ -338,6 +341,7 @@ static int lpm009m360a_write(const struct device *dev, const uint16_t x, const u
     const struct lpm009m360a_config *config = dev->config;
     struct lpm009m360a_data *data = dev->data;
     const uint8_t cmd = LPM009M360A_CMD_UPDATE | (config->color_mode[0] << 2);
+    if (atomic_get(&data->hold_frame)) return 0;
     bool wrote = false;
     int ret;
 
@@ -487,6 +491,20 @@ static const struct display_driver_api lpm009m360a_api = {
     .set_pixel_format = lpm009m360a_set_pixel_format,
     .set_orientation = lpm009m360a_set_orientation,
 };
+
+void zmk_memory_lcd_hold_frame(const struct device *dev) {
+    if (!device_is_ready(dev) || dev->api != &lpm009m360a_api) return;
+    struct lpm009m360a_data *data = dev->data;
+    const struct lpm009m360a_config *config = dev->config;
+    atomic_set(&data->hold_frame, 1);
+    /* The final write already sent its latch clocks and released SPI. Keep
+     * active-high SCS low while the CPU transitions, without clearing pixels. */
+    if (config->bus.config.cs.gpio.port) {
+        int rc = gpio_pin_configure_dt(&config->bus.config.cs.gpio,
+                                      GPIO_OUTPUT_INACTIVE | GPIO_PULL_DOWN);
+        if (rc < 0) LOG_WRN("Could not idle memory LCD CS: %d", rc);
+    }
+}
 
 #define LPM009M360A_INIT(inst)                                                                     \
                                                                                                    \

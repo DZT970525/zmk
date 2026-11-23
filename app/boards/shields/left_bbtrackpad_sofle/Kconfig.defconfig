@@ -31,7 +31,7 @@ config ZMK_POINTING_SMOOTH_SCROLLING
     default n
 
 config ZMK_INPUT_PROCESSOR_TEMP_LAYER
-    default y
+    default y if !ZMK_SPLIT || ZMK_SPLIT_ROLE_CENTRAL
 
 config ZITAOTECH_TRACKPAD_MOUSE_LAYER_CONTROL
     default y

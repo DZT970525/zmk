@@ -14,9 +14,8 @@ extern "C" {
 #include <stdbool.h>
 #include <stdint.h>
 
-#define TP_NONE_CMD 0
-#define TP_INC_CMD 1
-#define TP_DEC_CMD 2
+#define TP_INC_CMD 0
+#define TP_DEC_CMD 1
 
 /**
  * @brief check if the touchpad is touched

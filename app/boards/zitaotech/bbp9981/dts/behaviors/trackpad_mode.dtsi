@@ -1,0 +1,21 @@
+/*
+ * Trackpad mode switch behavior (&TP).
+ *
+ * Switches the trackpad between pointer mode and direction mode.  The key is
+ * inert until the mode-switch key is enabled on ZitaoTech Studio's Trackpad
+ * page; BBQ20 binds it to UPPER's (layer 2's) X key, position 29.
+ *
+ * Copyright (c) 2026 ZitaoTech
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+/ {
+    behaviors {
+        TP: trackpad_mode {
+            compatible = "zmk,behavior-trackpad-mode";
+            #binding-cells = <1>;
+            display-name = "TP MODE SWITCH";
+        };
+    };
+};

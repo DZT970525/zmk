@@ -12,6 +12,10 @@
 
 #include <zmk/keymap.h>
 #include <zmk/behavior.h>
+#if (IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE_LEFT) || IS_ENABLED(CONFIG_BOARD_ZITAOTECH_KEYPOINT_LEFT)) && !IS_ENABLED(CONFIG_ZMK_SETTINGS_RESET_ON_START)
+#include <zmk/mo_priority.h>
+#define ZMK_MO_PRIORITY_SUPPORTED 1
+#endif
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -46,14 +50,35 @@ static int mo_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
     LOG_DBG("position %d layer %d", event.position, binding->param1);
     const struct behavior_mo_config *cfg = zmk_behavior_get_binding(binding->behavior_dev)->config;
-    return zmk_keymap_layer_activate(binding->param1, cfg->locking);
+#if ZMK_MO_PRIORITY_SUPPORTED
+    if (!cfg->locking) {
+        if (binding->param1 >= ZMK_KEYMAP_LAYERS_LEN) return -EINVAL;
+        int ret = zmk_mo_priority_press(event.source, event.position, binding->param1);
+        if (ret <= 0) return ret;
+    }
+#endif
+    int result = zmk_keymap_layer_activate(binding->param1, cfg->locking);
+#if ZMK_MO_PRIORITY_SUPPORTED
+    if (!cfg->locking && !result) zmk_mo_priority_notify_display();
+#endif
+    return result;
 }
 
 static int mo_keymap_binding_released(struct zmk_behavior_binding *binding,
                                       struct zmk_behavior_binding_event event) {
     LOG_DBG("position %d layer %d", event.position, binding->param1);
     const struct behavior_mo_config *cfg = zmk_behavior_get_binding(binding->behavior_dev)->config;
-    return zmk_keymap_layer_deactivate(binding->param1, cfg->locking);
+#if ZMK_MO_PRIORITY_SUPPORTED
+    if (!cfg->locking && !zmk_mo_priority_release(event.source, event.position, binding->param1)) {
+        zmk_mo_priority_notify_display();
+        return 0;
+    }
+#endif
+    int result = zmk_keymap_layer_deactivate(binding->param1, cfg->locking);
+#if ZMK_MO_PRIORITY_SUPPORTED
+    if (!cfg->locking && !result) zmk_mo_priority_notify_display();
+#endif
+    return result;
 }
 
 static const struct behavior_driver_api behavior_mo_driver_api = {

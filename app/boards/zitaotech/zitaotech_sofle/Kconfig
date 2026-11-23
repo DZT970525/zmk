@@ -1,9 +1,11 @@
-# Copyright (c) 2025 ZitaoTech
-# SPDX-License-Identifier: MIT
-
-config BOARD_ZITAOTECH_SOFLE_LEFT
+config BOARD_SOFLE_DONGLE
+    bool
+config BOARD_SOFLE_DONGLE_LEFT
+    bool
+config BOARD_SOFLE_DONGLE_RIGHT
     bool
 
-config BOARD_ZITAOTECH_SOFLE_RIGHT
-    bool
-
+config SOFLE_MODULAR_POINTING
+    bool "SOFLE automatic per-hand pointing modules"
+    select SHIELD_LEFT_BBTRACKPAD_SOFLE if BOARD_SOFLE_DONGLE_LEFT || BOARD_SOFLE_DONGLE_RIGHT
+    select SHIELD_RIGHT_TRACKPOINT_SOFLE if BOARD_SOFLE_DONGLE_LEFT || BOARD_SOFLE_DONGLE_RIGHT

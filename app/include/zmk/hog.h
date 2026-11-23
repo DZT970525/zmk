@@ -15,3 +15,7 @@ int zmk_hog_send_consumer_report(struct zmk_hid_consumer_report_body *body);
 #if IS_ENABLED(CONFIG_ZMK_POINTING)
 int zmk_hog_send_mouse_report(struct zmk_hid_mouse_report_body *body);
 #endif // IS_ENABLED(CONFIG_ZMK_POINTING)
+
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN)
+void zmk_hog_diagnostics(uint8_t bytes[8]);
+#endif

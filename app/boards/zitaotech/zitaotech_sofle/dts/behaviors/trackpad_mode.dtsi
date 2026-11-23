@@ -15,7 +15,7 @@
         /omit-if-no-ref/ TP: trackpad_mode {
             compatible = "zmk,behavior-trackpad-mode";
             #binding-cells = <1>;
-            display-name = "TP";
+            display-name = "TP MODE SWITCH";
         };
     };
 };

@@ -1,0 +1,230 @@
+# Copyright (c) 2025 ZitaoTech
+# SPDX-License-Identifier: MIT
+
+# SOC and board symbols come from board.yml / the build target in the new
+# board scheme; assigning them here is no longer allowed.
+
+
+# (ARM_MPU is selected automatically by the SoC in Zephyr 4.x.)
+
+# enable GPIO
+CONFIG_GPIO=y
+CONFIG_PINCTRL=y
+# Build Configuration
+# The bootloader (and the MBR before it) lives below 0x1000, so the image has
+# to be linked into /chosen/zephyr,code-partition.  Without this the firmware
+# is linked and flashed at 0x0 and the board does not boot at all.
+CONFIG_USE_DT_CODE_PARTITION=y
+CONFIG_BUILD_OUTPUT_UF2=y
+# &bootloader needs the retention boot mode (stores the bootloader request in
+# GPREGRET across the reset, exactly like nice_nano does).
+CONFIG_RETAINED_MEM=y
+CONFIG_RETENTION=y
+CONFIG_RETENTION_BOOT_MODE=y
+
+# Flash configuration
+CONFIG_MPU_ALLOW_FLASH_WRITE=y
+CONFIG_NVS=y
+CONFIG_SETTINGS_NVS=y
+CONFIG_FLASH=y
+CONFIG_FLASH_PAGE_LAYOUT=y
+CONFIG_FLASH_MAP=y
+
+# (BT TX power is a Kconfig choice; the default is fine.)
+
+# Set max connected devices to 4
+CONFIG_BT_MAX_CONN=5
+CONFIG_BT_MAX_PAIRED=5
+# ZMK's split Kconfig selects the PHY / data-length update features and Zephyr
+# 4.x refuses a select whose own dependencies are unmet.
+CONFIG_BT_PHY_UPDATE=y
+CONFIG_BT_DATA_LEN_UPDATE=y
+# Sleep Setting
+CONFIG_ZMK_SLEEP=y
+CONFIG_PM_DEVICE=y
+CONFIG_ZMK_EXT_POWER=y
+# Keyboard idle timeout in milliseconds
+CONFIG_ZMK_IDLE_TIMEOUT=30000
+
+CONFIG_ZMK_BACKLIGHT=n
+
+CONFIG_ZMK_RGB_UNDERGLOW=n
+
+# HID indicator configuration
+CONFIG_ZMK_HID_INDICATORS=y
+
+# Enable pointing device driver
+CONFIG_ZMK_POINTING=y
+CONFIG_ZMK_MOUSE=y
+CONFIG_INPUT_THREAD_STACK_SIZE=2048
+# Debuncing Setting
+CONFIG_ZMK_KSCAN_DEBOUNCE_PRESS_MS=10
+CONFIG_ZMK_KSCAN_DEBOUNCE_RELEASE_MS=10
+
+# Enable both USB and BLE
+CONFIG_ZMK_USB=y
+CONFIG_ZMK_BLE=y
+
+# Milliseconds to wait after a setting change before writing it to flash memory
+CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE=1000
+
+# ZMK Studio
+CONFIG_ZMK_STUDIO=y
+CONFIG_ZMK_STUDIO_LOCKING=n
+CONFIG_ZMK_STUDIO_LOCK_ON_DISCONNECT=n
+# The custom-subsystem notifications carry a whole state message (the trackpad's
+# is ~90 bytes).  zmk's rpc_tx_buffer_write() spins in place while the TX ring
+# buffer cannot take the next chunk instead of yielding, and the chunk sender is
+# a system-workqueue item - so a notification raised from that same work queue
+# (a key press relayed from the peripheral, e.g. the &DPI keys on layer 1) could
+# never drain it and the keyboard hung outright.  Keep the buffer big enough
+# that a full notification always fits in one pass.
+CONFIG_ZMK_STUDIO_RPC_TX_BUF_SIZE=256
+
+# Runtime sensor rotate: lets ZitaoTech Studio re-bind the encoders per layer
+# (the keymap's sensor-bindings point at the &rsr_* behaviours).
+CONFIG_ZMK_RUNTIME_SENSOR_ROTATE=y
+CONFIG_ZMK_RUNTIME_SENSOR_ROTATE_STUDIO_RPC=y
+
+# Runtime macro + runtime combo (cormoran modules).  Both store their data
+# through zmk-feature-custom-settings, which the modules select themselves.
+CONFIG_ZMK_RUNTIME_MACRO=y
+CONFIG_ZMK_RUNTIME_MACRO_STUDIO_RPC=y
+CONFIG_ZMK_RUNTIME_MACRO_COUNT=16
+CONFIG_ZMK_RUNTIME_MACRO_POOL_BYTES=4096
+CONFIG_ZMK_RUNTIME_COMBO=y
+CONFIG_ZMK_RUNTIME_COMBO_STUDIO_RPC=y
+# Required alongside the module defaults: macro bodies are staged in this
+# "large value" buffer (see the module README's macro size limits).
+CONFIG_ZMK_CUSTOM_SETTINGS_LARGE_VALUE_MAX_SIZE=256
+# The macro/combo modules do their (large) storage work on ZMK's low priority
+# work queue; the module README asks for 2048 and the shield default is lower.
+CONFIG_ZMK_LOW_PRIORITY_THREAD_STACK_SIZE=2048
+
+# Default layer per host/OS, BLE management, OS detection, settings RPC.
+CONFIG_ZMK_DEFAULT_LAYER=y
+CONFIG_ZMK_DEFAULT_LAYER_MIN_INDEX=0
+CONFIG_ZMK_DEFAULT_LAYER_MAX_INDEX=4
+CONFIG_ZMK_DEFAULT_LAYER_STUDIO_RPC=y
+CONFIG_ZMK_BLE_MANAGEMENT=y
+CONFIG_ZMK_BLE_MANAGEMENT_STUDIO_RPC=y
+CONFIG_ZMK_OS_DETECTION=y
+CONFIG_ZMK_OS_DETECTION_STUDIO_RPC=y
+CONFIG_ZMK_OS_DETECTION_USB=y
+CONFIG_ZMK_OS_DETECTION_BLE=y
+# os-detection persists its per-profile state through the custom settings
+# array support.
+CONFIG_ZMK_CUSTOM_SETTINGS_ARRAY=y
+# Settings RPC: the "sleep settings" page reads and writes the idle/sleep
+# timeouts.  The module also selects CONFIG_ZMK_SPLIT_RELAY_EVENT, which this
+# tree implements on top of the split service's single-write relay
+# characteristic (see zmk/split/transport/types.h) instead of cormoran's
+# chunked one, so changes are pushed to the peripheral half too.
+CONFIG_ZMK_SETTINGS_RPC=y
+CONFIG_ZMK_SETTINGS_RPC_STUDIO=y
+CONFIG_ZMK_SPLIT_RELAY_EVENT=y
+# Sized so the whole relay payload fits a single ATT PDU: the split link never
+# exchanges MTUs, so it runs on the default 23 byte ATT MTU and the controller
+# ACL buffer is 27 bytes (CONFIG_BT_BUF_ACL_TX_SIZE), i.e. 20 payload bytes.
+# 2 (sizes) + 5 (name buffer) + 12 (largest relayed event) = 19 bytes.
+# Shrinking this instead of porting cormoran's chunked relay keeps the payload
+# in one write and one notification.
+CONFIG_ZMK_SPLIT_RELAY_EVENT_TYPE_NAME_LEN=4
+CONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN=12
+
+# TrackPoint pointer speed (ten DPI steps) + burst mode.  The value lives on
+# both halves (the central scales the motion, the peripheral drives the LED) and
+# the split relay above keeps them in step.  Studio talks to the central.
+CONFIG_ZITAOTECH_TRACKPOINT_CONTROL=y
+CONFIG_ZITAOTECH_TRACKPOINT_CONTROL_STUDIO_RPC=y
+# Automatic mouse layer: the trackpad and the TrackPoint each have their own
+# switch and their own timeout, both on by default with 800 ms. ZitaoTech
+# Studio changes them at runtime; these are the factory-reset values.
+CONFIG_ZITAOTECH_TRACKPAD_MOUSE_LAYER_DEFAULT=y
+CONFIG_ZITAOTECH_TRACKPAD_MOUSE_LAYER_MS=800
+CONFIG_ZITAOTECH_TRACKPAD_TRACKPOINT_MOUSE_LAYER_DEFAULT=y
+CONFIG_ZITAOTECH_TRACKPAD_TRACKPOINT_MOUSE_LAYER_MS=800
+
+# QMK style bootmagic: hold the configured key at power-up to drop into the UF2
+# bootloader.  Each half checks its own matrix, so either half can do it alone.
+CONFIG_ZITAOTECH_BOOTMAGIC=y
+CONFIG_ZITAOTECH_BOOTMAGIC_STUDIO_RPC=y
+# Default power-up key on this half: the left half's own MO 1 key, the outer key
+# of its thumb row (keymap position 60).
+CONFIG_ZITAOTECH_BOOTMAGIC_DEFAULT_KEY=48
+
+# ---------------------------------------------------------------------------
+# Device info: lets ZitaoTech Studio read this half's firmware version and
+# build time (the Firmware Update page shows them). The central half is the
+# one Studio talks to, so this is enabled here rather than on the peripheral.
+#
+# CONFIG_ZMK_DEVICE_INFO_VERSION is the version stamped into the image.
+# It defaults to "BetaV0.0"; change this single value for a named release.
+# ---------------------------------------------------------------------------
+CONFIG_ZMK_DEVICE_INFO=y
+CONFIG_ZMK_DEVICE_INFO_STUDIO_RPC=y
+CONFIG_ZMK_DEVICE_INFO_STUDIO_RPC_REQUIRE_UNLOCK=n
+CONFIG_ZMK_DEVICE_INFO_VERSION="V1.00-test"
+
+
+# ---------------------------------------------------------------------------
+# ZitaoTech Studio custom-subsystem modules: ALL DISABLED.
+#
+# These (runtime macro / runtime combo / device info / watchdog / kscan
+# diagnostics / per-host default layer / OS detection / BLE management /
+# settings RPC / runtime sensor rotate / input stream) are this project's
+# additions, not part of the stock ZMK build for this board. Every one of them
+# is switched off so the firmware is the plain keyboard again; re-enable the
+# ones you want once the board is confirmed stable.
+# ---------------------------------------------------------------------------
+# The remaining ZitaoTech Studio extension modules (device info, watchdog,
+# kscan diagnostics, per-host default layer, OS detection, BLE management,
+# settings RPC, input stream, split relay) are not part of this tree yet; each
+# one comes back with its module, one at a time.
+CONFIG_MAIN_STACK_SIZE=2048
+
+
+# Log via USB or Segger RTT
+CONFIG_ZMK_USB_LOGGING=n
+# CONFIG_LOG_PROCESS_THREAD_STARTUP_DELAY_MS=4000
+
+# Enable EC11 Setting
+
+# Enable Mouse
+CONFIG_INPUT=y
+CONFIG_ZMK_MOUSE=y
+CONFIG_ZMK_POINTING=y
+
+
+CONFIG_ZMK_MATRIX_TESTER=n
+
+
+# Hold the first-batch keyboard backlight gate low at GPIO initialization.
+CONFIG_GPIO_HOGS=y
+
+CONFIG_ZITAOTECH_TRACKPOINT_SCROLL_KEY_POSITION=49
+
+# Preserve the complete Keypoint name (17 bytes) in BLE and Studio.
+CONFIG_BT_DEVICE_NAME_MAX=16
+
+CONFIG_ZMK_KEYBOARD_NAME="SOFLE_DONGLE"
+CONFIG_BT_DEVICE_NAME_MAX=20
+CONFIG_ZMK_SPLIT_ROLE_CENTRAL=y
+CONFIG_ZMK_SPLIT_BLE_CENTRAL_PERIPHERALS=2
+CONFIG_BT_MAX_CONN=7
+CONFIG_BT_MAX_PAIRED=7
+CONFIG_ZMK_SLEEP=n
+CONFIG_ZITAOTECH_BOOTMAGIC_DEFAULT_KEY=0
+CONFIG_ZITAOTECH_TRACKPAD_CONTROL=y
+CONFIG_ZITAOTECH_TRACKPAD_CONTROL_STUDIO_RPC=y
+CONFIG_ZITAOTECH_TRACKPAD_MOUSE_LAYER_CONTROL=y
+CONFIG_ZITAOTECH_TRACKPAD_MOUSE_LAYER=3
+CONFIG_ZMK_INPUT_PROCESSOR_TEMP_LAYER=y
+CONFIG_ZITAOTECH_TRACKPAD_ARROW_KEY_POSITION=62
+CONFIG_ZITAOTECH_TRACKPAD_SCROLL_KEY_POSITION=1
+CONFIG_ZITAOTECH_TRACKPOINT_SCROLL_KEY_POSITION=62
+CONFIG_ZMK_DEVICE_INFO_VERSION="V1.00-test"
+
+
+# Match ordinary KEYPOINT: split wheels carry 1/16-notch units.
+CONFIG_ZMK_POINTING_SMOOTH_SCROLLING=y

@@ -13,6 +13,7 @@
 #include <zmk/event_manager.h>
 #include <zmk/events/keycode_state_changed.h>
 #include <zmk/behavior.h>
+#include <zmk/virtual_key_position.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -37,16 +38,25 @@ static const struct behavior_parameter_metadata metadata = {
 
 #endif
 
+static int raise_binding_keycode(struct zmk_behavior_binding *binding,
+                                 struct zmk_behavior_binding_event event, bool pressed) {
+    struct zmk_keycode_state_changed keycode =
+        zmk_keycode_state_changed_from_encoded(binding->param1, pressed, event.timestamp);
+    keycode.from_sensor = event.position >= ZMK_VIRTUAL_KEY_POSITION_SENSOR(0) &&
+                          event.position < ZMK_VIRTUAL_KEY_POSITION_SENSOR(ZMK_KEYMAP_SENSORS_LEN);
+    return raise_zmk_keycode_state_changed(keycode);
+}
+
 static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
     LOG_DBG("position %d keycode 0x%02X", event.position, binding->param1);
-    return raise_zmk_keycode_state_changed_from_encoded(binding->param1, true, event.timestamp);
+    return raise_binding_keycode(binding, event, true);
 }
 
 static int on_keymap_binding_released(struct zmk_behavior_binding *binding,
                                       struct zmk_behavior_binding_event event) {
     LOG_DBG("position %d keycode 0x%02X", event.position, binding->param1);
-    return raise_zmk_keycode_state_changed_from_encoded(binding->param1, false, event.timestamp);
+    return raise_binding_keycode(binding, event, false);
 }
 
 static const struct behavior_driver_api behavior_key_press_driver_api = {

@@ -236,6 +236,8 @@ static bool runtime_combo_global_cache_valid;
 struct runtime_combo_active {
     uint16_t combo_idx;
     uint8_t key_positions_pressed_count;
+    bool slow_release;
+    struct zmk_behavior_binding behavior;
     struct zmk_position_state_changed_event
         key_positions_pressed[CONFIG_ZMK_RUNTIME_COMBO_MAX_POSITIONS_PER_COMBO];
 };
@@ -245,6 +247,10 @@ static struct zmk_position_state_changed_event
     pending_keys[CONFIG_ZMK_RUNTIME_COMBO_MAX_POSITIONS_PER_COMBO];
 static struct runtime_combo_active active_combos[CONFIG_ZMK_COMBO_MAX_PRESSED_COMBOS];
 static uint8_t active_combo_count;
+/* A released fast combo must not reserve an active slot just to swallow its
+ * remaining constituent releases. Zero means none; otherwise store the
+ * original down timestamp + 1, so replay cannot turn that press into a new key. */
+static int64_t released_combo_keys[ZMK_KEYMAP_LEN];
 static struct k_work_delayable timeout_task;
 static int64_t timeout_task_timeout_at;
 static int64_t last_tapped_timestamp = INT32_MIN;
@@ -255,6 +261,7 @@ static int32_t fully_pressed_combo_idx = -1;
 
 static void finish_pending_and_activate(uint32_t combo_idx,
                                         const struct zmk_runtime_combo_config *combo);
+static bool release_combo_key(uint32_t position, int64_t timestamp);
 
 static void put_u16(uint8_t *dest, uint16_t value) { sys_put_le16(value, dest); }
 static void put_u32(uint8_t *dest, uint32_t value) { sys_put_le32(value, dest); }
@@ -882,6 +889,11 @@ static bool combo_matches_pending(const struct zmk_runtime_combo_config *combo,
         if (!combo_contains_position(combo, pending_keys[i].data.position)) {
             return false;
         }
+        for (uint8_t j = 0; j < i; j++) {
+            if (pending_keys[j].data.position == pending_keys[i].data.position) {
+                return false;
+            }
+        }
     }
     return true;
 }
@@ -1043,14 +1055,18 @@ static int release_combo_behavior(uint32_t combo_idx, const struct zmk_runtime_c
     return zmk_behavior_invoke_binding(&combo->behavior, event, false);
 }
 
-static struct runtime_combo_active *store_active_combo(uint32_t combo_idx, uint8_t count) {
+static struct runtime_combo_active *store_active_combo(
+    uint32_t combo_idx, uint8_t count, const struct zmk_runtime_combo_config *combo) {
     if (active_combo_count >= CONFIG_ZMK_COMBO_MAX_PRESSED_COMBOS) {
         LOG_WRN("Unable to store runtime combo; active combo limit reached");
         return NULL;
     }
 
     struct runtime_combo_active *active = &active_combos[active_combo_count++];
-    *active = (struct runtime_combo_active){.combo_idx = combo_idx};
+    struct zmk_runtime_combo_global_settings global = runtime_combo_cached_global_settings();
+    *active = (struct runtime_combo_active){.combo_idx = combo_idx,
+                                            .behavior = combo->behavior,
+                                            .slow_release = effective_slow_release(combo, &global)};
     for (uint8_t i = 0; i < count; i++) {
         active->key_positions_pressed[i] = pending_keys[i];
     }
@@ -1059,7 +1075,7 @@ static struct runtime_combo_active *store_active_combo(uint32_t combo_idx, uint8
 }
 
 static int activate_combo(uint32_t combo_idx, const struct zmk_runtime_combo_config *combo) {
-    struct runtime_combo_active *active = store_active_combo(combo_idx, pending_count);
+    struct runtime_combo_active *active = store_active_combo(combo_idx, pending_count, combo);
     if (!active) {
         cleanup_pending();
         return ZMK_EV_EVENT_CAPTURED;
@@ -1085,7 +1101,13 @@ static void finish_pending_and_activate(uint32_t combo_idx,
         leftover[i] = pending_keys[combo_len + i];
     }
 
-    struct runtime_combo_active *active = store_active_combo(combo_idx, combo_len);
+    struct runtime_combo_active *active = store_active_combo(combo_idx, combo_len, combo);
+    if (!active) {
+        /* Capacity exhaustion must replay the whole chord, not silently drop
+         * the constituent presses of a deferred subset. */
+        cleanup_pending();
+        return;
+    }
     pending_count = 0;
     k_work_cancel_delayable(&timeout_task);
     timeout_task_timeout_at = 0;
@@ -1116,6 +1138,39 @@ static int find_complete_combo(struct zmk_runtime_combo_config *combo,
 }
 
 static int position_state_down(struct zmk_position_state_changed *data) {
+    /* Combo constituents are captured, so a strictly newer down at an active
+     * position proves that its earlier up was missed. Retire that old press;
+     * a same/older replay must not create a duplicate active record. */
+    for (uint8_t i = 0; i < active_combo_count;) {
+        struct runtime_combo_active *active = &active_combos[i];
+        bool matched = false;
+        for (uint8_t j = 0; j < active->key_positions_pressed_count; j++) {
+            const struct zmk_position_state_changed *old = &active->key_positions_pressed[j].data;
+            if (old->position == data->position) {
+                if (data->timestamp <= old->timestamp) {
+                    return ZMK_EV_EVENT_HANDLED;
+                }
+                release_combo_key(data->position, data->timestamp);
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) {
+            i++;
+        }
+    }
+    if (data->position < ZMK_KEYMAP_LEN && released_combo_keys[data->position] != 0) {
+        if (data->timestamp < released_combo_keys[data->position]) {
+            return ZMK_EV_EVENT_HANDLED;
+        }
+        released_combo_keys[data->position] = 0;
+    }
+    for (uint8_t i = 0; i < pending_count; i++) {
+        if (pending_keys[i].data.position == data->position) {
+            /* Never let repeated/replayed downs satisfy a multi-key chord. */
+            return ZMK_EV_EVENT_CAPTURED;
+        }
+    }
     int candidates = count_candidates_for_position(data->position, data->timestamp);
     if (candidates == 0) {
         if (fire_fully_pressed_combo()) {
@@ -1158,17 +1213,10 @@ static void deactivate_combo(uint8_t active_combo_index) {
     active_combos[active_combo_count] = (struct runtime_combo_active){0};
 }
 
-static bool release_combo_key(int32_t position, int64_t timestamp) {
+static bool release_combo_key(uint32_t position, int64_t timestamp) {
     for (uint8_t active_idx = 0; active_idx < active_combo_count; active_idx++) {
         struct runtime_combo_active *active = &active_combos[active_idx];
-        struct zmk_runtime_combo_config combo;
-        if (runtime_combo_cache_read(active->combo_idx, &combo) < 0) {
-            deactivate_combo(active_idx);
-            return true;
-        }
-
         bool key_released = false;
-        bool all_keys_pressed = active->key_positions_pressed_count == combo.key_position_len;
         bool all_keys_released = true;
         for (uint8_t i = 0; i < active->key_positions_pressed_count; i++) {
             if (key_released) {
@@ -1177,6 +1225,10 @@ static bool release_combo_key(int32_t position, int64_t timestamp) {
             } else if (active->key_positions_pressed[i].data.position != position) {
                 all_keys_released = false;
             } else {
+                if (timestamp < active->key_positions_pressed[i].data.timestamp) {
+                    /* An older replayed up cannot release a newer press. */
+                    return true;
+                }
                 key_released = true;
             }
         }
@@ -1186,12 +1238,18 @@ static bool release_combo_key(int32_t position, int64_t timestamp) {
         }
 
         active->key_positions_pressed_count--;
-        struct zmk_runtime_combo_global_settings global = runtime_combo_cached_global_settings();
-        bool slow_release = effective_slow_release(&combo, &global);
-        if ((slow_release && all_keys_released) || (!slow_release && all_keys_pressed)) {
+        if (all_keys_released || !active->slow_release) {
+            /* Keep the binding/policy captured at activation, even if Studio
+             * edits or deletes this combo while its keys are held. */
+            struct zmk_runtime_combo_config combo = {.behavior = active->behavior};
             release_combo_behavior(active->combo_idx, &combo, timestamp);
-        }
-        if (all_keys_released) {
+            for (uint8_t i = 0; i < active->key_positions_pressed_count; i++) {
+                const struct zmk_position_state_changed *remaining =
+                    &active->key_positions_pressed[i].data;
+                if (remaining->position < ZMK_KEYMAP_LEN) {
+                    released_combo_keys[remaining->position] = remaining->timestamp + 1;
+                }
+            }
             deactivate_combo(active_idx);
         }
         return true;
@@ -1203,7 +1261,32 @@ static int position_state_up(struct zmk_position_state_changed *data) {
     if (pending_count > 0 && !fire_fully_pressed_combo()) {
         cleanup_pending();
     }
+    /* Replaying the second and later pending presses starts at the first
+     * listener, so this same position may have been captured again. Resolve
+     * it before forwarding its release; otherwise a released key remains a
+     * candidate and its next press can complete a combo with itself. */
+    for (;;) {
+        bool still_pending = false;
+        for (uint8_t i = 0; i < pending_count; i++) {
+            if (pending_keys[i].data.position == data->position) {
+                still_pending = true;
+                break;
+            }
+        }
+        if (!still_pending) {
+            break;
+        }
+        if (!fire_fully_pressed_combo()) {
+            cleanup_pending();
+        }
+    }
     if (release_combo_key(data->position, data->timestamp)) {
+        return ZMK_EV_EVENT_HANDLED;
+    }
+    if (data->position < ZMK_KEYMAP_LEN && released_combo_keys[data->position] != 0) {
+        if (data->timestamp >= released_combo_keys[data->position] - 1) {
+            released_combo_keys[data->position] = 0;
+        }
         return ZMK_EV_EVENT_HANDLED;
     }
     return ZMK_EV_EVENT_BUBBLE;

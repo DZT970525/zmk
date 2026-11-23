@@ -10,6 +10,10 @@
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include <zmk/battery.h>
+#include <zmk/split/role.h>
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+#include <zmk/keypoint_relay.h>
+#endif
 #include <zmk/display.h>
 #include <zmk/events/usb_conn_state_changed.h>
 #include <zmk/event_manager.h>
@@ -21,6 +25,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include "peripheral_status.h"
 #include "screen_config.h"
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN)
+#include "codex_quota.h"
+#endif
 #include "screen_transfer.h"
 #include "screen_image_store.h"
 #include <string.h>
@@ -61,38 +68,38 @@ static bool img_switch_work_ready;
 
 /* Bit i of the mask is bunny_frames[i]; 0 means "every picture", so a bad
  * value cannot leave the screen stuck on one image forever. */
-static uint16_t carousel_picture_mask(void) {
-    uint16_t mask = zitaotech_screen_enabled_mask();
-    return mask == 0 ? (uint16_t)BIT_MASK(BUNNY_FRAME_COUNT) : mask;
+static uint32_t carousel_picture_mask(void) {
+    uint32_t mask = zitaotech_screen_enabled_mask();
+    return mask == 0 ? (uint32_t)BIT_MASK(BUNNY_FRAME_COUNT) : mask;
 }
 
 static bool carousel_picture_enabled(uint8_t index) {
-    if (index >= BUNNY_FRAME_COUNT && !zitaotech_screen_image_data(index-BUNNY_FRAME_COUNT)) return false;
+    if (index >= BUNNY_FRAME_COUNT && !zitaotech_screen_image_info(index-BUNNY_FRAME_COUNT, &(struct zitaotech_screen_image_info){0})) return false;
     return (carousel_picture_mask() & BIT(index)) != 0;
 }
 
 /** Next picture to show: a random enabled one that is not the current one. */
 static uint8_t carousel_first_index(void) {
-    uint8_t packed[5]; zitaotech_screen_playback_order(packed);
-    for(unsigned i=0;i<10;i++){unsigned id=(packed[i/2]>>(i%2?0:4))&15;if(carousel_picture_enabled(id))return id;}
+    uint8_t order[28]; zitaotech_screen_playback_order(order);
+    for(unsigned i=0;i<28;i++)if(carousel_picture_enabled(order[i]))return order[i];
     return 0;
 }
 static uint8_t carousel_pick_index(void) {
     if (zitaotech_screen_sequential()) {
-        uint8_t packed[5], order[10]; zitaotech_screen_playback_order(packed);
-        unsigned start=9; for(unsigned i=0;i<10;i++){ order[i]=(packed[i/2]>>(i%2?0:4))&15; if(order[i]==current_img_index)start=i; }
-        for(unsigned step=1;step<=10;step++){unsigned id=order[(start+step)%10];if(carousel_picture_enabled(id))return id;}
+        uint8_t order[28]; zitaotech_screen_playback_order(order);
+        unsigned start=27;for(unsigned i=0;i<28;i++)if(order[i]==current_img_index)start=i;
+        for(unsigned step=1;step<=28;step++){unsigned id=order[(start+step)%28];if(carousel_picture_enabled(id))return id;}
         return 0;
     }
-    uint8_t candidates[BUNNY_FRAME_COUNT+2];
+    uint8_t candidates[BUNNY_FRAME_COUNT+ZITAOTECH_SCREEN_IMAGE_SLOTS];
     unsigned count=0;
-    for (uint8_t i=0; i<BUNNY_FRAME_COUNT+2; i++)
+    for (uint8_t i=0; i<BUNNY_FRAME_COUNT+ZITAOTECH_SCREEN_IMAGE_SLOTS; i++)
         if (carousel_picture_enabled(i) && i != current_img_index) candidates[count++]=i;
     if (count) return candidates[sys_rand32_get()%count];
     return carousel_picture_enabled(current_img_index) ? current_img_index : 0;
 }
-static uint8_t user_pixels[2][64+4320];
-static lv_image_dsc_t user_descriptors[2];
+static uint8_t user_pixels[64+4320];
+static lv_image_dsc_t user_descriptor;
 static void carousel_show(struct zmk_widget_status *widget, uint8_t index) {
     lv_obj_t *art=lv_obj_get_child(widget->obj,1);
     if (index < BUNNY_FRAME_COUNT) { lv_image_set_src(art,bunny_frames[index]); return; }
@@ -100,21 +107,22 @@ static void carousel_show(struct zmk_widget_status *widget, uint8_t index) {
     struct zitaotech_screen_image_info info;
     const uint8_t *data=zitaotech_screen_image_data(slot);
     if (!data || !zitaotech_screen_image_info(slot,&info)) return;
+    lv_image_cache_drop(&user_descriptor);
     unsigned palette_size=info.format == 1 ? 8 : 64;
-    memset(user_pixels[slot],0,palette_size);
+    memset(user_pixels,0,palette_size);
     for (unsigned i=0; i<(info.format == 1 ? 2 : 16); i++) {
         unsigned color=info.format == 1 ? (i ? 7 : 0) : i;
-        user_pixels[slot][i*4]=(color&1) ? 255 : 0;
-        user_pixels[slot][i*4+1]=(color&2) ? 255 : 0;
-        user_pixels[slot][i*4+2]=(color&4) ? 255 : 0;
-        user_pixels[slot][i*4+3]=255;
+        user_pixels[i*4]=(color&1) ? 255 : 0;
+        user_pixels[i*4+1]=(color&2) ? 255 : 0;
+        user_pixels[i*4+2]=(color&4) ? 255 : 0;
+        user_pixels[i*4+3]=255;
     }
-    memcpy(user_pixels[slot]+palette_size,data,info.size);
-    user_descriptors[slot]=(lv_image_dsc_t){
+    memcpy(user_pixels+palette_size,data,info.size);
+    user_descriptor=(lv_image_dsc_t){
         .header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=info.format == 1 ? LV_COLOR_FORMAT_I1 : LV_COLOR_FORMAT_I4,
                  .w=120,.h=72,.stride=info.format == 1 ? 15 : 60},
-        .data_size=palette_size+info.size,.data=user_pixels[slot]};
-    lv_image_set_src(art,&user_descriptors[slot]);
+        .data_size=palette_size+info.size,.data=user_pixels};
+    lv_image_set_src(art,&user_descriptor);
     lv_obj_invalidate(art);
 }
 static void carousel_schedule(void) {
@@ -151,6 +159,10 @@ static void draw_profile_slots(struct zmk_widget_status *widget,
 #include <zmk/wpm.h>
 #include <zmk/endpoints.h>
 #include <zmk/events/layer_state_changed.h>
+#if (IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE_LEFT) || IS_ENABLED(CONFIG_BOARD_ZITAOTECH_KEYPOINT_LEFT)) && !IS_ENABLED(CONFIG_ZMK_SETTINGS_RESET_ON_START)
+#include <zmk/events/mo_priority_changed.h>
+#define LPM_MO_PRIORITY_SUPPORTED 1
+#endif
 #include <zmk/events/wpm_state_changed.h>
 #include <zmk/events/endpoint_changed.h>
 #include <zmk/events/ble_active_profile_changed.h>
@@ -179,12 +191,23 @@ struct output_status_state {
 /* LVGL work stays on the display queue, with no intentional slot delay. */
 static bool central_output_dirty;
 static int central_drawn_profile = -1;
+static int64_t central_data_after;
+static struct k_work_delayable central_status_refresh_work;
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+static bool central_drawn_relay;
+#endif
 static void central_status_refresh(struct k_work *work) {
     ARG_UNUSED(work);
     bool redraw_output = central_output_dirty;
     central_output_dirty = false;
     int profile = zmk_ble_active_profile_index();
     bool redraw_profile = profile != central_drawn_profile;
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+    bool relay=zmk_keypoint_relay_routed();
+    redraw_profile=redraw_profile || relay!=central_drawn_relay;
+    central_drawn_relay=relay;
+#endif
+    if(redraw_profile)central_data_after=k_uptime_get()+60;
     struct zmk_widget_status *widget;
     SYS_SLIST_FOR_EACH_CONTAINER(&widgets, widget, node) {
         widget->state.active_profile_index = profile;
@@ -192,10 +215,14 @@ static void central_status_refresh(struct k_work *work) {
             draw_profile_slots(widget, &widget->state);
         }
         if (redraw_output) {
-            draw_top(widget->obj, widget->cbuf, &widget->state);
+            if(k_uptime_get()>=central_data_after)
+                draw_top(widget->obj, widget->cbuf, &widget->state);
+            else central_output_dirty=true;
         }
     }
     central_drawn_profile = profile;
+    if(central_output_dirty)
+        k_work_reschedule_for_queue(zmk_display_work_q(),&central_status_refresh_work,K_MSEC(60));
 }
 static K_WORK_DELAYABLE_DEFINE(central_status_refresh_work, central_status_refresh);
 
@@ -258,6 +285,9 @@ static void layer_status_update_cb(struct output_status_state state) {
 ZMK_DISPLAY_WIDGET_LISTENER(widget_layer_status, struct output_status_state, layer_status_update_cb,
                             central_output_get_state)
 ZMK_SUBSCRIPTION(widget_layer_status, zmk_layer_state_changed);
+#if LPM_MO_PRIORITY_SUPPORTED
+ZMK_SUBSCRIPTION(widget_layer_status, zmk_mo_priority_changed);
+#endif
 #endif
 
 // ================= 顶部绘制 =================
@@ -265,6 +295,26 @@ ZMK_SUBSCRIPTION(widget_layer_status, zmk_layer_state_changed);
 static void draw_wpm(lv_obj_t *canvas, uint16_t cbuf[], const struct status_state *state);
 #endif
 static void draw_top(lv_obj_t *widget, uint16_t cbuf[], const struct status_state *state);
+
+/* Rotate the larger status buffer in place, avoiding an extra 12 KiB scratch
+ * buffer. Shift eight rows after rotation to preserve the panel's 72px width. */
+static void rotate_status_canvas(lv_obj_t *canvas, uint16_t *pixels) {
+    const int n = STATUS_CANVAS_SIZE;
+    for (int ring=0; ring<n/2; ring++) {
+        int end=n-1-ring;
+        for (int x=ring; x<end; x++) {
+            int offset=x-ring;
+            uint16_t top=pixels[ring*n+x];
+            pixels[ring*n+x]=pixels[x*n+end];
+            pixels[x*n+end]=pixels[end*n+end-offset];
+            pixels[end*n+end-offset]=pixels[(end-offset)*n+ring];
+            pixels[(end-offset)*n+ring]=top;
+        }
+    }
+    memmove(pixels,pixels+(n-CANVAS_SIZE)*n,CANVAS_SIZE*n*sizeof(uint16_t));
+    memset(pixels+CANVAS_SIZE*n,0,(n-CANVAS_SIZE)*n*sizeof(uint16_t));
+    lv_obj_invalidate(canvas);
+}
 
 static void draw_top(lv_obj_t *widget, uint16_t cbuf[], const struct status_state *state) {
     lv_obj_t *canvas = lv_obj_get_child(widget, 0);
@@ -279,7 +329,7 @@ static void draw_top(lv_obj_t *widget, uint16_t cbuf[], const struct status_stat
     lv_canvas_init_layer(canvas, &layer);
 
     // Fill background
-    lv_area_t area = {0, 0, CANVAS_SIZE - 1, CANVAS_SIZE - 1};
+    lv_area_t area = {0, 0, STATUS_CANVAS_SIZE - 1, STATUS_CANVAS_SIZE - 1};
     lv_draw_rect(&layer, &rect_black_dsc, &area);
 
     // Draw connection / output icon
@@ -296,7 +346,20 @@ static void draw_top(lv_obj_t *widget, uint16_t cbuf[], const struct status_stat
         /* Nothing connected yet: fall back to the preferred transport so an
          * unpaired BLE profile still shows the gear instead of nothing. */
         endpoint = zmk_endpoint_get_preferred();
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+        /* USB preference alone is not an active USB output. Without a host,
+         * show the BLE pairing/reconnect state instead of a USB icon. */
+        if (endpoint.transport == ZMK_TRANSPORT_USB && !zmk_usb_is_hid_ready()) {
+            endpoint.transport = ZMK_TRANSPORT_BLE;
+        }
+#endif
     }
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+    if (zmk_keypoint_relay_routed()) {
+        label_dsc.color=LVGL_OUTPUT_CONNECTED;
+        label_dsc.text=LV_SYMBOL_WIFI;
+    } else
+#endif
     if (endpoint.transport == ZMK_TRANSPORT_USB) {
         label_dsc.color = LVGL_OUTPUT_USB;
         label_dsc.text = LV_SYMBOL_USB;
@@ -333,7 +396,7 @@ static void draw_top(lv_obj_t *widget, uint16_t cbuf[], const struct status_stat
 #endif
 
     // Rotate canvas
-    rotate_canvas(canvas, cbuf);
+    rotate_status_canvas(canvas, cbuf);
 }
 
 // ================= 图片切换函数 =================
@@ -458,17 +521,80 @@ struct wpm_status_state {
 
 /* Keep the existing circles and numbers, using rounded rectangles instead of
  * arc draw tasks. This path runs only after the BLE selection settles. */
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RUNTIME_ROLE) || IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+static void draw_dongle_macintosh(uint16_t *buffer) {
+static const char *const rows[] = {
+        "..#############################..", ".###############################.",
+        "###...........................###", "##.............................##",
+        "##...#######################...##", "##..#########################..##",
+        "##..##.....................##..##", "##..##.....................##..##",
+        "##..##.....................##..##", "##..##....##....##...##....##..##",
+        "##..##....##....##...##....##..##", "##..##....##....##...##....##..##",
+        "##..##..........##.........##..##", "##..##..........##.........##..##",
+        "##..##........####.........##..##", "##..##........####.........##..##",
+        "##..##.....................##..##", "##..##......##....##.......##..##",
+        "##..##......########.......##..##", "##..##.......######........##..##",
+        "##..##.....................##..##", "##..##.....................##..##",
+        "##..#########################..##", "##...#######################...##",
+        "##.............................##", "##.............................##",
+        "##.............................##", "##.............................##",
+        "##....................####.....##", "##..###............#########...##",
+        "##..###.............########...##", "##.............................##",
+        "##.............................##", "##.............................##",
+        "##.............................##", "#################################",
+        ".###############################.", ".##...........................##.",
+        ".##...........................##.", ".##...........................##.",
+        ".###############################.", ".###############################.",
+    };
+    /* Match the receiver splash order. The memory LCD maps these to its
+     * supported palette; draw the icon in black over five equal color bands. */
+    static const uint32_t rainbow[] = {
+        0x73B55B, 0xFFFF00, 0xD94A4B, 0x8E428F, 0x4798C8
+    };
+    const int rainbow_y=0, rainbow_height=57;
+    for (int y=0; y<rainbow_height; y++) {
+        uint16_t color=lv_color_to_u16(lv_color_hex(rainbow[y*ARRAY_SIZE(rainbow)/rainbow_height]));
+        for (int x=4; x<CANVAS_SIZE-4; x++)
+            buffer[(rainbow_y+y)*CANVAS_SIZE+x]=color;
+    }
+    uint16_t foreground=lv_color_to_u16(lv_color_black());
+    /* Portrait WPM ends at 64 and the layer strip starts at 128.
+     * The slots canvas starts at 68: center the enlarged icon at 96. */
+    const int width=40,height=51;
+    const int x0=(CANVAS_SIZE-width)/2,y0=3;
+    for (int y=0;y<height;y++) {
+        unsigned source_y=y*ARRAY_SIZE(rows)/height;
+        for (int x=0;x<width;x++) {
+            unsigned source_x=x*33/width;
+            if (rows[source_y][source_x]=='#')
+                buffer[(y0+y)*CANVAS_SIZE+x0+x]=foreground;
+        }
+    }
+}
+#endif
 static void draw_profile_slots(struct zmk_widget_status *widget,
                                const struct status_state *state) {
     lv_obj_t *canvas = central_slots_canvas;
     if (canvas == NULL) {
         return;
     }
-    const int offsets[4][2] = {{18, 15}, {50, 15}, {18, 46}, {50, 46}};
+    const int offsets[4][2] = {{20, 12}, {52, 12}, {20, 41}, {52, 41}};
     uint16_t background = lv_color_to_u16(LVGL_BACKGROUND);
     for (int i = 0; i < CANVAS_SIZE * CANVAS_SIZE; i++) {
         widget->cbuf3[i] = background;
     }
+    #if IS_ENABLED(CONFIG_ZMK_SPLIT_RUNTIME_ROLE) || IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+    if (!zmk_split_role_is_central()
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+        || zmk_keypoint_relay_routed()
+#endif
+    ) {
+        draw_dongle_macintosh(widget->cbuf3);
+        rotate_canvas(canvas,widget->cbuf3);
+        lv_obj_invalidate(canvas);
+        return;
+    }
+    #endif
     lv_layer_t layer;
     lv_canvas_init_layer(canvas, &layer);
     for (int slot = 0; slot < 4; slot++) {
@@ -478,28 +604,57 @@ static void draw_profile_slots(struct zmk_widget_status *widget,
         lv_draw_rect_dsc_t circle;
         init_rect_dsc(&circle, selected ? lvgl_profile_color(slot) : LVGL_FOREGROUND);
         circle.radius = LV_RADIUS_CIRCLE;
-        lv_area_t area = {cx - 13, cy - 13, cx + 12, cy + 12};
+        lv_area_t area = {cx - 12, cy - 12, cx + 11, cy + 11};
         lv_draw_rect(&layer, &circle, &area);
         init_rect_dsc(&circle, LVGL_BACKGROUND);
         circle.radius = LV_RADIUS_CIRCLE;
-        area = (lv_area_t){cx - 11, cy - 11, cx + 10, cy + 10};
+        area = (lv_area_t){cx - 10, cy - 10, cx + 9, cy + 9};
         lv_draw_rect(&layer, &circle, &area);
         if (selected) {
             init_rect_dsc(&circle, lvgl_profile_color(slot));
             circle.radius = LV_RADIUS_CIRCLE;
-            area = (lv_area_t){cx - 9, cy - 9, cx + 8, cy + 8};
+            area = (lv_area_t){cx - 8, cy - 8, cx + 7, cy + 7};
             lv_draw_rect(&layer, &circle, &area);
         }
         char label[2] = {(char)('1' + slot), '\0'};
         lv_draw_label_dsc_t label_dsc;
         init_label_dsc(&label_dsc, selected ? LVGL_BACKGROUND : LVGL_FOREGROUND,
-                       &lv_font_montserrat_18, LV_TEXT_ALIGN_CENTER);
+                       &lv_font_montserrat_16, LV_TEXT_ALIGN_CENTER);
         label_dsc.text = label;
-        area = (lv_area_t){cx - 8, cy - 10, cx + 7, cy + 7};
+        area = (lv_area_t){cx - 8, cy - 9, cx + 7, cy + 8};
         lv_draw_label(&layer, &label_dsc, &area);
     }
     lv_canvas_finish_layer(canvas, &layer);
     rotate_canvas(canvas, widget->cbuf3);
+    lv_obj_invalidate(canvas);
+}
+/* Rotate the narrow layer strip in place; the bitmap is 72x16 before drawing
+ * and 16x72 afterward. A bitset marks cycles without a second pixel buffer. */
+static void rotate_layer_canvas(lv_obj_t *canvas, uint16_t *pixels) {
+    const int w=CANVAS_SIZE, h=LAYER_CANVAS_HEIGHT, count=w*h;
+    uint8_t visited[(CANVAS_SIZE*LAYER_CANVAS_HEIGHT+7)/8]={0};
+    uint16_t edge[CANVAS_SIZE];
+    uint16_t bg=lv_color_to_u16(LVGL_BACKGROUND);
+    for(int y=0;y<w;y++)edge[y]=y<h?pixels[y*w]:bg;
+    for(int start=0;start<count;start++) {
+        if(visited[start/8] & (1U << (start%8)))continue;
+        int current=start;
+        uint16_t value=pixels[current];
+        do {
+            int next=(w-1-current%w)*h+current/w;
+            uint16_t old=pixels[next];
+            pixels[next]=value;
+            value=old;
+            visited[current/8] |= 1U << (current%8);
+            current=next;
+        } while(current!=start);
+    }
+    /* Keep the original pivot's one-column offset and uncovered edge. */
+    for(int y=0;y<w;y++) {
+        memmove(pixels+y*h+1,pixels+y*h,(h-1)*sizeof(uint16_t));
+        pixels[y*h]=edge[y];
+    }
+    lv_canvas_set_buffer(canvas,pixels,h,w,LV_COLOR_FORMAT_NATIVE);
     lv_obj_invalidate(canvas);
 }
 static void draw_layer_name(struct zmk_widget_status *widget,
@@ -511,13 +666,21 @@ static void draw_layer_name(struct zmk_widget_status *widget,
         return;
     }
 
+    lv_canvas_set_buffer(canvas, widget->cbuf2, CANVAS_SIZE, LAYER_CANVAS_HEIGHT, LV_COLOR_FORMAT_NATIVE);
     /* Background first (plain pixel writes), then the layer name as a label. */
     uint16_t layer_bg = lv_color_to_u16(LVGL_BACKGROUND);
-    for (int i = 0; i < CANVAS_SIZE * CANVAS_SIZE; i++) {
+    for (int i = 0; i < CANVAS_SIZE * LAYER_CANVAS_HEIGHT; i++) {
         widget->cbuf2[i] = layer_bg;
     }
 
-    zmk_keymap_layer_index_t index = zmk_keymap_highest_layer_active();
+    #if IS_ENABLED(CONFIG_ZMK_SPLIT_RUNTIME_ROLE)
+    if (!zmk_split_role_is_central()) {
+        rotate_layer_canvas(canvas,widget->cbuf2);
+        lv_obj_invalidate(canvas);
+        return;
+    }
+    #endif
+    zmk_keymap_layer_index_t index = zmk_keymap_display_layer_index();
     const char *name = zmk_keymap_layer_name(zmk_keymap_layer_index_to_id(index));
     char text[24];
     if (name != NULL) {
@@ -539,13 +702,34 @@ static void draw_layer_name(struct zmk_widget_status *widget,
 
     /* Same rotation bake as the battery/WPM canvas (the old draw_bottom() did
      * this too), otherwise the layer name comes out sideways. */
-    rotate_canvas(canvas, widget->cbuf2);
+    rotate_layer_canvas(canvas, widget->cbuf2);
 
     lv_obj_invalidate(canvas);
     return;
 }
 
 static void draw_wpm(lv_obj_t *canvas, uint16_t cbuf[], const struct status_state *state) {
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+    if (zmk_mac_pair_pending() || zmk_mac_pair_connecting()) {
+        lv_layer_t prompt_layer;lv_canvas_init_layer(canvas,&prompt_layer);
+        lv_draw_rect_dsc_t frame,bg;
+        init_rect_dsc(&frame,LVGL_FOREGROUND);init_rect_dsc(&bg,LVGL_BACKGROUND);
+        lv_area_t area={2,18,70,70};lv_draw_rect(&prompt_layer,&frame,&area);
+        area=(lv_area_t){3,19,69,69};lv_draw_rect(&prompt_layer,&bg,&area);
+        lv_draw_label_dsc_t label;
+        init_label_dsc(&label,LVGL_FOREGROUND,&lv_font_unscii_8,LV_TEXT_ALIGN_CENTER);
+        label.text=zmk_mac_pair_connecting() ? "Linking\nto\ndongle" : "Press\nspace to\nconnect";
+        area=(lv_area_t){3,31,69,62};lv_draw_label(&prompt_layer,&label,&area);
+        lv_canvas_finish_layer(canvas,&prompt_layer);return;
+    }
+#endif
+
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN)
+    if (keypoint_quota_draw(canvas)) return;
+#endif
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RUNTIME_ROLE)
+    if (!zmk_split_role_is_central()) return;
+#endif
     lv_draw_rect_dsc_t rect_white_dsc;
     init_rect_dsc(&rect_white_dsc, LVGL_FOREGROUND);
     lv_draw_rect_dsc_t rect_black_dsc;
@@ -560,9 +744,9 @@ static void draw_wpm(lv_obj_t *canvas, uint16_t cbuf[], const struct status_stat
      * the edge of the visible area and disappeared. */
     /* v0.3 geometry: 70x44 frame at y=21, inset by 2px so the left border is
      * not eaten by the panel edge. */
-    lv_area_t area = {2, 21, 2 + 70 - 1, 21 + 44 - 1};
+    lv_area_t area = {2, 18, 70, 70};
     lv_draw_rect(&layer, &rect_white_dsc, &area);
-    area = (lv_area_t){3, 22, 3 + 68 - 1, 22 + 42 - 1};
+    area = (lv_area_t){3, 19, 69, 69};
     lv_draw_rect(&layer, &rect_black_dsc, &area);
 
     char wpm_text[6] = {};
@@ -570,7 +754,7 @@ static void draw_wpm(lv_obj_t *canvas, uint16_t cbuf[], const struct status_stat
     lv_draw_label_dsc_t label_dsc;
     init_label_dsc(&label_dsc, LVGL_FOREGROUND, &lv_font_unscii_8, LV_TEXT_ALIGN_RIGHT);
     label_dsc.text = wpm_text;
-    area = (lv_area_t){42, 52, 42 + 24 - 1, 52 + 8 - 1};
+    area = (lv_area_t){42, 59, 65, 66};
     lv_draw_label(&layer, &label_dsc, &area);
 
     int max = 0;
@@ -600,15 +784,15 @@ static void draw_wpm(lv_obj_t *canvas, uint16_t cbuf[], const struct status_stat
     lv_point_t points[10];
     for (int i = 0; i < 10; i++) {
         points[i].x = 4 + i * 7;
-        points[i].y = 62 - (int)(((float)(state->wpm[i] - min) * 38.0f) / range + 0.5f);
+        points[i].y = 68 - (int)(((float)(state->wpm[i] - min) * 48.0f) / range + 0.5f);
         /* Hard clamp into the frame: WPM swings can push the computed y past
          * the frame border, and those stray pixels ended up as a grey halftone
          * blob at the left edge of the WPM box. */
-        if (points[i].y < 23) {
-            points[i].y = 23;
+        if (points[i].y < 20) {
+            points[i].y = 20;
         }
-        if (points[i].y > 62) {
-            points[i].y = 62;
+        if (points[i].y > 68) {
+            points[i].y = 68;
         }
     }
 
@@ -619,7 +803,7 @@ static void draw_wpm(lv_obj_t *canvas, uint16_t cbuf[], const struct status_stat
      * accumulates over the previous frame. */
     lv_draw_rect_dsc_t inner_bg_dsc;
     init_rect_dsc(&inner_bg_dsc, LVGL_BACKGROUND);
-    lv_area_t inner_area = {4, 23, 4 + 64 - 1, 23 + 38 - 1};
+    lv_area_t inner_area = {4, 20, 67, 68};
     lv_draw_rect(&graph_layer, &inner_bg_dsc, &inner_area);
 
     lv_draw_line_dsc_t graph_dsc;
@@ -677,14 +861,29 @@ ZMK_DISPLAY_WIDGET_LISTENER(widget_wpm_status, struct wpm_status_state, wpm_stat
 ZMK_SUBSCRIPTION(widget_wpm_status, zmk_wpm_state_changed);
 #endif /* central half */
 
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN)
+static void quota_timer_cb(lv_timer_t *timer) {
+    ARG_UNUSED(timer);
+    /* Let the slot canvas reach the panel before telemetry redraw work. */
+    if(zmk_ble_active_profile_index()!=central_drawn_profile ||
+       k_uptime_get()<central_data_after)return;
+    static uint32_t previous = UINT32_MAX;
+    uint32_t current = keypoint_quota_revision();
+    if (current == previous) return;
+    previous = current;
+    struct zmk_widget_status *widget;
+    SYS_SLIST_FOR_EACH_CONTAINER(&widgets, widget, node)
+        draw_top(widget->obj, widget->cbuf, &widget->state);
+}
+#endif
 int zmk_widget_status_init(struct zmk_widget_status *widget, lv_obj_t *parent) {
     widget->obj = lv_obj_create(parent);
     lv_obj_set_size(widget->obj, 144, 72);
 
     // --- 顶部 canvas ---
     lv_obj_t *top = lv_canvas_create(widget->obj);
-    lv_obj_align(top, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-    lv_canvas_set_buffer(top, widget->cbuf, CANVAS_SIZE, CANVAS_SIZE, LV_COLOR_FORMAT_NATIVE);
+    lv_obj_align(top, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_canvas_set_buffer(top, widget->cbuf, STATUS_CANVAS_SIZE, STATUS_CANVAS_SIZE, LV_COLOR_FORMAT_NATIVE);
     /*
      * The status canvas comes out rotated 90 degrees clockwise on this panel
      * (the battery, which is drawn along the top-left edge, showed up on the
@@ -705,11 +904,11 @@ int zmk_widget_status_init(struct zmk_widget_status *widget, lv_obj_t *parent) {
      * identical.
      */
     lv_obj_align(middle, LV_ALIGN_TOP_LEFT, 128, 0);
-    lv_canvas_set_buffer(middle, widget->cbuf2, CANVAS_SIZE, CANVAS_SIZE, LV_COLOR_FORMAT_NATIVE);
+    lv_canvas_set_buffer(middle, widget->cbuf2, LAYER_CANVAS_HEIGHT, CANVAS_SIZE, LV_COLOR_FORMAT_NATIVE);
 
     /* BLE profile slots canvas - x=68 like the old firmware's middle canvas. */
     lv_obj_t *slots = lv_canvas_create(widget->obj);
-    lv_obj_align(slots, LV_ALIGN_TOP_LEFT, 68, 0);
+    lv_obj_align(slots, LV_ALIGN_TOP_LEFT, 74, 0);
     lv_canvas_set_buffer(slots, widget->cbuf3, CANVAS_SIZE, CANVAS_SIZE, LV_COLOR_FORMAT_NATIVE);
     central_slots_canvas = slots;
     central_layer_canvas = middle;
@@ -742,6 +941,14 @@ int zmk_widget_status_init(struct zmk_widget_status *widget, lv_obj_t *parent) {
     widget_output_status_init();
     widget_profile_status_init();
     widget_layer_status_init();
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN)
+    static bool quota_timer_ready;
+    if (!quota_timer_ready) {
+        /* Unchanged revisions skip redraw; check mode switches promptly. */
+        lv_timer_create(quota_timer_cb, 20, NULL);
+        quota_timer_ready = true;
+    }
+#endif
 #endif
 
     // 初始化定时器（只初始化一次）
@@ -787,3 +994,15 @@ void zmk_widget_status_transfer_changed(void) {
 
 
 
+
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+ZMK_SUBSCRIPTION(widget_profile_status, zmk_keypoint_relay_changed);
+#endif
+
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE) || IS_ENABLED(CONFIG_ZITAOTECH_KEYPOINT_SCREEN)
+ZMK_SUBSCRIPTION(widget_profile_status,zmk_endpoint_changed);
+#endif
+
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE)
+ZMK_SUBSCRIPTION(widget_output_status,zmk_keypoint_relay_changed);
+#endif

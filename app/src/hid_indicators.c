@@ -13,12 +13,19 @@
 #include <zmk/events/hid_indicators_changed.h>
 #include <zmk/events/endpoint_changed.h>
 #include <zmk/split/central.h>
+#include <zmk/split/role.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 static zmk_hid_indicators_t hid_indicators[ZMK_ENDPOINT_COUNT];
 
 zmk_hid_indicators_t zmk_hid_indicators_get_current_profile(void) {
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RUNTIME_ROLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
+    if (!zmk_split_role_is_central()) {
+        extern zmk_hid_indicators_t zmk_split_peripheral_hid_indicators(void);
+        return zmk_split_peripheral_hid_indicators();
+    }
+#endif
     return zmk_hid_indicators_get_profile(zmk_endpoint_get_selected());
 }
 

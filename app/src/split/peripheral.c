@@ -10,6 +10,10 @@
 
 #include <zmk/stdlib.h>
 #include <zmk/split/transport/peripheral.h>
+#include <zmk/split/role.h>
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_PEER_SELECTION)
+#include <zmk/split/peer_selection.h>
+#endif
 
 #include <drivers/behavior.h>
 #include <zmk/behavior.h>
@@ -22,6 +26,16 @@
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
 #include <zmk/events/hid_indicators_changed.h>
+#include <zmk/hid_indicators.h>
+static zmk_hid_indicators_t peripheral_hid_indicators;
+/* Peripheral LEDs and pointer modes follow the central's selected host. */
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_DUAL_ROLE_BUILD)
+zmk_hid_indicators_t zmk_split_peripheral_hid_indicators(void) {
+#else
+zmk_hid_indicators_t zmk_hid_indicators_get_current_profile(void) {
+#endif
+    return peripheral_hid_indicators;
+}
 #endif
 
 #include <zephyr/init.h>
@@ -29,12 +43,18 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-const struct zmk_split_transport_peripheral *active_transport;
+static const struct zmk_split_transport_peripheral *active_transport;
 
 int zmk_split_transport_peripheral_command_handler(
     const struct zmk_split_transport_peripheral *transport,
     struct zmk_split_transport_central_command cmd) {
     LOG_DBG("");
+
+    if (!zmk_keypoint_config_ready() &&
+        (cmd.type==ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_INVOKE_BEHAVIOR ||
+         cmd.type==ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_SET_PHYSICAL_LAYOUT)) {
+        return -EAGAIN;
+    }
 
     switch (cmd.type) {
     case ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_INVOKE_BEHAVIOR: {
@@ -64,6 +84,7 @@ int zmk_split_transport_peripheral_command_handler(
     }
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
     case ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_SET_HID_INDICATORS: {
+        peripheral_hid_indicators = cmd.data.set_hid_indicators.indicators;
         return raise_zmk_hid_indicators_changed((struct zmk_hid_indicators_changed){
             .indicators = cmd.data.set_hid_indicators.indicators});
     }
@@ -76,6 +97,12 @@ int zmk_split_transport_peripheral_command_handler(
 }
 
 int zmk_split_peripheral_report_event(const struct zmk_split_transport_peripheral_event *event) {
+    if (!zmk_keypoint_config_ready()) { return -EAGAIN; }
+#if IS_ENABLED(CONFIG_ZMK_KEYPOINT_PEER_SELECTION)
+    if (!zmk_keypoint_peer_connection_verified()) {
+        return -ENOTCONN;
+    }
+#endif
     if (!active_transport || !active_transport->api || !active_transport->api->report_event) {
         LOG_WRN("No active transport that supports reporting events!");
         return -ENODEV;
@@ -91,7 +118,11 @@ int zmk_split_peripheral_report_event(const struct zmk_split_transport_periphera
  * active so, for example, this half's settings can be reported back to the
  * central for the Studio UI.
  */
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_DUAL_ROLE_BUILD)
+int zmk_split_peripheral_relay_event_send(const struct zmk_split_relay_event_payload *payload) {
+#else
 int zmk_split_relay_event_send(const struct zmk_split_relay_event_payload *payload) {
+#endif
     struct zmk_split_transport_peripheral_event event = {
         .type = ZMK_SPLIT_TRANSPORT_PERIPHERAL_EVENT_TYPE_RELAY_EVENT,
         .data = {.relay_event = *payload},
@@ -103,6 +134,11 @@ int zmk_split_relay_event_send(const struct zmk_split_relay_event_payload *paylo
 #endif // IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
 
 static int select_first_available_transport(void) {
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RUNTIME_ROLE)
+    if (zmk_split_role_is_central()) {
+        return 0;
+    }
+#endif
     // Transports are sorted by priority, so find the first
     // One that's available, and enable it. Any transport that
     // Doesn't support `get_status` is assumed to be always
@@ -166,6 +202,11 @@ static int peripheral_init(void) {
 SYS_INIT(peripheral_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 
 int split_peripheral_listener(const zmk_event_t *eh) {
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RUNTIME_ROLE)
+    if (zmk_split_role_is_central()) {
+        return ZMK_EV_EVENT_BUBBLE;
+    }
+#endif
     LOG_DBG("");
     const struct zmk_position_state_changed *pos_ev;
     if ((pos_ev = as_zmk_position_state_changed(eh)) != NULL) {

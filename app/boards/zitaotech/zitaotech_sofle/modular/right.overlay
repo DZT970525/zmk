@@ -1,0 +1,22 @@
+/ {
+    chosen { zmk,trackpad_led = &right_trackpad_led; };
+    right_trackpad_led: right_trackpad_led {
+        compatible = "pwm-leds";
+        led { pwms = <&pwm1 1 PWM_USEC(20) PWM_POLARITY_NORMAL>; };
+    };
+};
+/* The module types use different LED contacts on the right connector.
+ * Keep the TrackPoint on channel 0/P0.04; touchpad uses channel 1/P0.16.
+ * Only the detected module's LED worker is started. */
+&pwm1_default {
+    group1 { psels = <NRF_PSEL(PWM_OUT0, 0, 4)>, <NRF_PSEL(PWM_OUT1, 0, 16)>; };
+};
+&pwm1_sleep {
+    group1 { psels = <NRF_PSEL(PWM_OUT0, 0, 4)>, <NRF_PSEL(PWM_OUT1, 0, 16)>; };
+};
+/* Automatic layer processing belongs to the left central. */
+&zip_temp_layer { status = "disabled"; };
+&i2c0 { bbtrackpad: a320@37 { compatible = "avago,a320"; reg = <0x37>; status = "okay"; }; };
+/ { split_inputs {
+    right_trackpad_split: right_trackpad_split@3 { compatible = "zmk,input-split"; reg = <3>; device = <&bbtrackpad>; };
+}; };

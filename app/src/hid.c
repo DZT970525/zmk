@@ -318,6 +318,14 @@ void zmk_hid_keyboard_clear(void) {
     memset(&keyboard_report.body, 0, sizeof(keyboard_report.body));
 }
 
+void zmk_hid_modifiers_reset(void) {
+    memset(explicit_modifier_counts, 0, sizeof(explicit_modifier_counts));
+    explicit_modifiers = 0;
+    implicit_modifiers = 0;
+    masked_modifiers = 0;
+    keyboard_report.body.modifiers = 0;
+}
+
 int zmk_hid_consumer_press(zmk_key_t code) {
     TOGGLE_CONSUMER(0U, code);
     return 0;

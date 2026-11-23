@@ -1,4 +1,7 @@
-if(CONFIG_ZMK_DISPLAY AND CONFIG_NICE_VIEW_WIDGET_STATUS)
+if(CONFIG_ZMK_DISPLAY AND CONFIG_ZMK_SETTINGS_RESET_ON_START)
+  zephyr_library_sources(reset_status_screen.c)
+  zephyr_library_sources(display_driver/lpm009m360a.c)
+elseif(CONFIG_ZMK_DISPLAY AND CONFIG_NICE_VIEW_WIDGET_STATUS)
   zephyr_library_include_directories(${CMAKE_SOURCE_DIR}/include)
   zephyr_library_sources(custom_status_screen.c)
   zephyr_library_sources(widgets/bolt.c)
@@ -13,6 +16,13 @@ if(CONFIG_ZMK_DISPLAY AND CONFIG_NICE_VIEW_WIDGET_STATUS)
   zephyr_library_sources(widgets/screen_config.c)
   zephyr_library_sources(widgets/screen_image_store.c)
   zephyr_library_sources(widgets/screen_transfer.c)
+  if(CONFIG_ZMK_KEYPOINT_RELAY_SOURCE OR CONFIG_ZITAOTECH_KEYPOINT_SCREEN)
+    if(CONFIG_ZMK_STUDIO_RPC)
+      target_sources(app PRIVATE widgets/codex_quota.c widgets/area_pictures.c)
+    else()
+      zephyr_library_sources(widgets/codex_quota.c widgets/area_pictures.c)
+    endif()
+  endif()
 
   # Studio RPC for the carousel.  Both the generated Studio protos
   # (<proto/zmk/custom.pb.h>) and the shield's own message types are needed, and

@@ -1,0 +1,14 @@
+/*
+ * Copyright (c) 2026 ZitaoTech
+ * SPDX-License-Identifier: MIT
+ */
+
+/ {
+    behaviors {
+        DPI: pdpi {
+            compatible = "zmk,behavior-pointing-dpi";
+            #binding-cells = <2>;
+            display-name = "DPI";
+        };
+    };
+};

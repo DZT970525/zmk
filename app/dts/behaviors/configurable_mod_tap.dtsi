@@ -1,0 +1,13 @@
+/* SPDX-License-Identifier: MIT */
+/ {
+    behaviors {
+        configurable_mt: configurable_mod_tap {
+            compatible = "zmk,behavior-hold-tap";
+            #binding-cells = <2>;
+            flavor = "balanced";
+            tapping-term-ms = <400>;
+            bindings = <&kp>, <&kp>;
+            display-name = "Configurable Mod-Tap";
+        };
+    };
+};

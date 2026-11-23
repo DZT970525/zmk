@@ -113,6 +113,8 @@ uint32_t zitaotech_trackpoint_scroll_accel(void);
 int32_t zitaotech_trackpoint_scroll_key_position(void);
 int zitaotech_trackpoint_set_scroll_key_position(int32_t position);
 bool zitaotech_trackpoint_scroll_key_pressed(void);
+/* Discard motion while position 61 is waiting for its hold decision. */
+bool zitaotech_trackpoint_scroll_key_pending(void);
 
 /** Caps Lock also puts the TrackPoint into scroll mode (on by default). */
 bool zitaotech_trackpoint_scroll_capslock_enabled(void);
@@ -191,7 +193,8 @@ enum zitaotech_trackpoint_mode {
     ZITAOTECH_TRACKPOINT_MODE_FAST = 1,
     ZITAOTECH_TRACKPOINT_MODE_SLOW = 2,
     ZITAOTECH_TRACKPOINT_MODE_SCROLL = 3,
-    ZITAOTECH_TRACKPOINT_MODE_COUNT = 4,
+    ZITAOTECH_TRACKPOINT_MODE_FAST_SCROLL = 4,
+    ZITAOTECH_TRACKPOINT_MODE_COUNT = 5,
 };
 
 int32_t zitaotech_trackpoint_mode_key_position(enum zitaotech_trackpoint_mode mode);

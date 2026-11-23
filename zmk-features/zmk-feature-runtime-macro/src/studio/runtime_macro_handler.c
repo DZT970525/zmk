@@ -23,6 +23,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #define RUNTIME_MACRO_RPC_MAX_STEPS 64
 
+BUILD_ASSERT(ARRAY_SIZE(((cormoran_runtime_macro_ListMacrosResponse *)0)->macros) >=
+             CONFIG_ZMK_RUNTIME_MACRO_COUNT, "Macro RPC list must cover every macro slot");
+
 static bool runtime_macro_rpc_handle_request(const zmk_custom_CallRequest *raw_request,
                                              pb_callback_t *encode_response);
 
@@ -297,20 +300,20 @@ static int list_macros_cb(uint32_t slot, const char *name, size_t encoded_size,
 }
 
 static int handle_list_macros(cormoran_runtime_macro_Response *resp) {
-    cormoran_runtime_macro_ListMacrosResponse result =
-        cormoran_runtime_macro_ListMacrosResponse_init_zero;
+    cormoran_runtime_macro_ListMacrosResponse *result = &resp->response_type.list_macros;
+    memset(result, 0, sizeof(*result));
 
-    result.max_macro_bytes = CONFIG_ZMK_RUNTIME_MACRO_MAX_BYTES;
-    result.max_name_length = CONFIG_ZMK_RUNTIME_MACRO_NAME_MAX_LEN;
+    result->max_macro_bytes = CONFIG_ZMK_RUNTIME_MACRO_MAX_BYTES;
+    result->max_name_length = CONFIG_ZMK_RUNTIME_MACRO_NAME_MAX_LEN;
 
-    struct list_macros_ctx ctx = {.result = &result};
+    struct list_macros_ctx ctx = {.result = result};
     int ret = zmk_runtime_macro_for_each(list_macros_cb, &ctx);
     if (ret < 0) {
         return ret;
     }
 
     resp->which_response_type = cormoran_runtime_macro_Response_list_macros_tag;
-    resp->response_type.list_macros = result;
+
 
     return 0;
 }

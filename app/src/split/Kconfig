@@ -6,8 +6,141 @@ menuconfig ZMK_SPLIT
 
 if ZMK_SPLIT
 
+config ZMK_KEYPOINT_RELAY_SOURCE
+    bool "KEYPOINT left master HID relay server"
+    depends on (BOARD_KEYPOINT_DONGLE_LEFT || BOARD_SOFLE_DONGLE_LEFT || BOARD_ZITAOTECH_KEYPOINT_LEFT) && ZMK_SPLIT_ROLE_CENTRAL
+    select BT_EXT_ADV
+    help
+      Left remains master; a separate bonded identity forwards final HID reports.
+
+config ZMK_KEYPOINT_NO_IDLE_RELAY_ADVERTISING
+    bool "Diagnostic: disable unused Macintosh advertising"
+    depends on ZMK_KEYPOINT_RELAY_SOURCE
+    default n
+    help
+      Direct-host isolation test only; prevent a new Macintosh relay connection.
+      Do not enable in the normal Dongle-compatible release.
+
+config ZMK_KEYPOINT_RELAY_RECEIVER
+    bool "KEYPOINT Macintosh HID receiver"
+    depends on (BOARD_KEYPOINT_DONGLE || BOARD_SOFLE_DONGLE) && ZMK_SPLIT_ROLE_CENTRAL
+    select BT_EXT_ADV
+    select BT_GATT_CLIENT
+    select BT_GATT_AUTO_DISCOVER_CCC
+    help
+      Receive final HID reports from the left, without split events or keymap sync.
+
+config ZMK_KEYPOINT_RIGHT_FIXED_LEFT
+    bool "KEYPOINT right always pairs to the left master"
+    depends on (BOARD_KEYPOINT_DONGLE_RIGHT || BOARD_SOFLE_DONGLE_RIGHT || BOARD_ZITAOTECH_KEYPOINT_RIGHT) && ZMK_KEYPOINT_PEER_SELECTION
+
 config ZMK_SPLIT_ROLE_CENTRAL
     bool "Split central device"
+
+config ZMK_SPLIT_DUAL_ROLE_BUILD
+    bool "Experimental KEYPOINT dual-role transport compilation"
+    depends on (BOARD_KEYPOINT_DONGLE_LEFT || BOARD_SOFLE_DONGLE_LEFT || BOARD_ZITAOTECH_KEYPOINT_LEFT) && ZMK_SPLIT_BLE
+    select ZMK_SPLIT_ROLE_CENTRAL
+    help
+      Build both transport implementations for the hybrid left half.
+      This is build bring-up only; runtime routing is not yet complete.
+      Keep disabled in distributed firmware.
+
+config ZMK_SPLIT_RUNTIME_ROLE
+    bool "Experimental KEYPOINT runtime role routing"
+    depends on ZMK_SPLIT_DUAL_ROLE_BUILD && SETTINGS
+    help
+      Route keyboard and host reports according to the persisted boot role.
+      The topology coordinator and configuration synchronization must be
+      integrated before this can be distributed as a dual-mode release.
+
+config ZMK_KEYPOINT_PEER_SELECTION
+    bool "Experimental KEYPOINT named split peers"
+    depends on ZMK_SPLIT_BLE && SETTINGS
+    depends on (BOARD_KEYPOINT_DONGLE || BOARD_SOFLE_DONGLE) || (BOARD_KEYPOINT_DONGLE_LEFT || BOARD_SOFLE_DONGLE_LEFT || BOARD_ZITAOTECH_KEYPOINT_LEFT) || (BOARD_KEYPOINT_DONGLE_RIGHT || BOARD_SOFLE_DONGLE_RIGHT || BOARD_ZITAOTECH_KEYPOINT_RIGHT)
+    select BT_GATT_CLIENT
+    select SETTINGS_RUNTIME
+    help
+      Authenticate central identity over GATT and keep dongle and left-master
+      addresses separately. Enable on all three devices together only after
+      topology coordination and configuration synchronization are integrated.
+
+config ZMK_KEYPOINT_CONFIG_SYNC
+    bool "Experimental KEYPOINT durable configuration replay"
+    depends on ZMK_SPLIT_RUNTIME_ROLE && ZMK_KEYPOINT_PEER_SELECTION
+    depends on ZMK_RUNTIME_MACRO && ZMK_RUNTIME_SENSOR_ROTATE && ZMK_KEYMAP_LAYER_REORDERING
+    select SETTINGS_RUNTIME
+    help
+      Load the authoritative configuration journal after boot settings load.
+      Keep keyboard input gated until capture or committed snapshot replay
+      finishes. This does not yet implement Bluetooth snapshot transport.
+
+config ZMK_KEYPOINT_CONFIG_TRANSFER
+    bool "Experimental KEYPOINT encrypted configuration export"
+    depends on ZMK_KEYPOINT_CONFIG_SYNC && (BOARD_KEYPOINT_DONGLE_LEFT || BOARD_SOFLE_DONGLE_LEFT || BOARD_ZITAOTECH_KEYPOINT_LEFT)
+    help
+      Allow the verified dongle to read a frozen left-authority configuration
+      snapshot and upload proposals over encrypted GATT. The left assigns and
+      durably stores revisions, replaying proposals on its next role reboot.
+      The topology coordinator and Studio proposal hooks remain pending.
+
+config ZMK_KEYPOINT_CONFIG_DOWNLOAD
+    bool "Experimental KEYPOINT dongle configuration transfer client"
+    depends on ZMK_KEYPOINT_PEER_SELECTION
+    depends on (BOARD_KEYPOINT_DONGLE || BOARD_SOFLE_DONGLE)
+    select BT_GATT_CLIENT
+    help
+      Read the left's frozen authoritative configuration into a caller-owned
+      staging buffer, verifying the revision, length and full CRC. The topology
+      coordinator must validate and journal the result before using it. Upload
+      proposals against the last acknowledged revision and wait for durable
+      acceptance; the left replays them when its role reboots.
+
+config ZMK_KEYPOINT_CONFIG_MIRROR
+    bool "Experimental KEYPOINT dongle authoritative configuration bridge"
+    depends on ZMK_KEYPOINT_CONFIG_DOWNLOAD && SETTINGS
+    depends on ZMK_RUNTIME_MACRO && ZMK_RUNTIME_SENSOR_ROTATE && ZMK_KEYMAP_LAYER_REORDERING
+    select SETTINGS_RUNTIME
+    help
+      Download and journal the left-authority snapshot before enabling input
+      and Studio. Forward Studio changes to the left and wait for durable
+      acceptance before acknowledging them. Keep disabled in released builds
+      until topology coordination and hardware verification are complete.
+
+config ZMK_KEYPOINT_TOPOLOGY_FALLBACK
+    bool "Experimental KEYPOINT offline dongle fallback"
+    depends on ZMK_KEYPOINT_PEER_SELECTION
+    depends on (BOARD_KEYPOINT_DONGLE_LEFT || BOARD_SOFLE_DONGLE_LEFT || BOARD_ZITAOTECH_KEYPOINT_LEFT) || (BOARD_KEYPOINT_DONGLE_RIGHT || BOARD_SOFLE_DONGLE_RIGHT || BOARD_ZITAOTECH_KEYPOINT_RIGHT)
+    depends on !(BOARD_KEYPOINT_DONGLE_LEFT || BOARD_SOFLE_DONGLE_LEFT || BOARD_ZITAOTECH_KEYPOINT_LEFT) || ZMK_KEYPOINT_CONFIG_SYNC
+    help
+      When disconnected from the dongle for the grace interval, prepare and
+      checkpoint the left before rebooting it as master. The right changes
+      its target to the left and refreshes its directed advertisement.
+      This implements offline fallback only, not return-to-dongle discovery
+      or manual topology switching. Enable only in experimental builds.
+
+config ZMK_KEYPOINT_DONGLE_PRESENCE_SERVER
+    bool "Experimental KEYPOINT dedicated dongle probe advertising"
+    depends on ZMK_KEYPOINT_CONFIG_MIRROR
+    select BT_EXT_ADV
+    help
+      Advertise a separate directed probe connection to the last authenticated
+      left half without changing the host advertising set or host profiles.
+      Set BT_EXT_ADV_MAX_ADV_SET to at least two. This is only the dongle endpoint;
+      authenticated left-side probing is a separate integration step.
+
+config ZMK_KEYPOINT_DONGLE_PRESENCE_CLIENT
+    bool "Experimental authenticated left master dongle probe"
+    depends on (BOARD_KEYPOINT_DONGLE_LEFT || BOARD_SOFLE_DONGLE_LEFT || BOARD_ZITAOTECH_KEYPOINT_LEFT) && ZMK_KEYPOINT_TOPOLOGY_FALLBACK
+    help
+      Scan while the right half is connected, reuse the stored dongle bond,
+      and verify its encrypted identity before preparing a topology return.
+
+config ZMK_KEYPOINT_TOPOLOGY_GRACE_MS
+    int "Offline dongle fallback grace interval"
+    depends on ZMK_KEYPOINT_TOPOLOGY_FALLBACK
+    default 2000
+    range 1000 60000
 
 config ZMK_SPLIT_BLE
     bool "BLE Split"

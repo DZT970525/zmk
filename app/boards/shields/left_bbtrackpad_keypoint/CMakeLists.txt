@@ -1,0 +1,13 @@
+if(NOT CONFIG_ZMK_SETTINGS_RESET_ON_START AND NOT CONFIG_SOFLE_MODULAR_POINTING)
+zephyr_library()
+zephyr_library_sources(${CMAKE_CURRENT_SOURCE_DIR}/../../zitaotech/zitaotech_sofle/custom_driver_left/a320.c)
+zephyr_library_sources(${CMAKE_CURRENT_SOURCE_DIR}/../../zitaotech/zitaotech_sofle/custom_driver_left/trackpad_led.c)
+zephyr_library_include_directories(${ZEPHYR_BASE}/drivers)
+zephyr_library_include_directories(../../../include)
+zephyr_library_include_directories(${CMAKE_SOURCE_DIR}/include)
+zephyr_library_include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../zitaotech/zitaotech_sofle/custom_driver)
+endif()
+
+if(NOT CONFIG_SOFLE_MODULAR_POINTING)
+zephyr_compile_definitions(MOTION_GPIO_PIN=8)
+endif()

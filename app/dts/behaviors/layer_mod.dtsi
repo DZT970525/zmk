@@ -1,0 +1,9 @@
+/ {
+    behaviors {
+        lm: layer_mod {
+            compatible = "zitaotech,behavior-layer-mod";
+            #binding-cells = <2>;
+            display-name = "Momentary Layer with Modifier";
+        };
+    };
+};

@@ -20,6 +20,10 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/events/endpoint_changed.h>
 #include <zmk/events/wpm_state_changed.h>
 #include <zmk/events/layer_state_changed.h>
+#if (IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE_LEFT) || IS_ENABLED(CONFIG_BOARD_ZITAOTECH_KEYPOINT_LEFT)) && !IS_ENABLED(CONFIG_ZMK_SETTINGS_RESET_ON_START)
+#include <zmk/events/mo_priority_changed.h>
+#define LPM_MO_PRIORITY_SUPPORTED 1
+#endif
 #include <zmk/usb.h>
 #include <zmk/ble.h>
 #include <zmk/endpoints.h>
@@ -333,14 +337,18 @@ static void layer_status_update_cb(struct layer_status_state state) {
 }
 
 static struct layer_status_state layer_status_get_state(const zmk_event_t *eh) {
-    uint8_t index = zmk_keymap_highest_layer_active();
-    return (struct layer_status_state){.index = index, .label = zmk_keymap_layer_name(index)};
+    uint8_t index = zmk_keymap_display_layer_index();
+    return (struct layer_status_state){.index = index,
+        .label = zmk_keymap_layer_name(zmk_keymap_layer_index_to_id(index))};
 }
 
 ZMK_DISPLAY_WIDGET_LISTENER(widget_layer_status, struct layer_status_state, layer_status_update_cb,
                             layer_status_get_state)
 
 ZMK_SUBSCRIPTION(widget_layer_status, zmk_layer_state_changed);
+#if LPM_MO_PRIORITY_SUPPORTED
+ZMK_SUBSCRIPTION(widget_layer_status, zmk_mo_priority_changed);
+#endif
 
 static void set_wpm_status(struct zmk_widget_status *widget, struct wpm_status_state state) {
     for (int i = 0; i < 9; i++) {

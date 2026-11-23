@@ -1,0 +1,28 @@
+&i2c0 { trackpoint: trackpoint@15 { compatible = "zmk,trackpoint"; reg = <0x15>; status = "okay"; }; };
+/ {
+    split_inputs {
+        left_trackpoint_split: left_trackpoint_split@2 { compatible = "zmk,input-split"; reg = <2>; device = <&trackpoint>; };
+        right_trackpad_split: right_trackpad_split@3 { compatible = "zmk,input-split"; reg = <3>; };
+    };
+    input_processors {
+        left_tp_processor: left_tp_processor { compatible = "zmk,input-processor-sofle-left-trackpoint"; #input-processor-cells = <0>; track-remainders; };
+        right_pad_processor: right_pad_processor { compatible = "zmk,input-processor-sofle-right-trackpad"; #input-processor-cells = <0>; };
+    };
+    left_trackpoint_listener { compatible = "zmk,input-listener"; device = <&left_trackpoint_split>;
+        input-processors = <&zip_temp_layer 3 600>, <&left_tp_processor>, <&ip_behaviors0>, <&ip_behaviors1>, <&ip_behaviors2>, <&ip_behaviors3>;
+    };
+    right_trackpad_listener { compatible = "zmk,input-listener"; device = <&right_trackpad_split>;
+        input-processors = <&zip_temp_layer 3 600>, <&right_pad_processor>, <&ip_behaviors0>, <&ip_behaviors1>, <&ip_behaviors2>, <&ip_behaviors3>;
+    };
+};
+
+&bbtrackpad_split { reg = <1>; device = <&bbtrackpad>; };
+&bbtrackpad_listener { device = <&bbtrackpad_split>; };
+&bbtrackball_listener { status = "disabled"; };
+&bbtrackball_split { status = "disabled"; };
+
+&pinctrl {
+ module_alt_default: module_alt_default { group1 { psels = <NRF_PSEL(TWIM_SDA, 0, 8)>, <NRF_PSEL(TWIM_SCL, 0, 4)>; bias-pull-up; }; };
+ module_alt_sleep: module_alt_sleep { group1 { psels = <NRF_PSEL(TWIM_SDA, 0, 8)>, <NRF_PSEL(TWIM_SCL, 0, 4)>; low-power-enable; }; };
+};
+/ { zephyr,user { module-alt-default = <&module_alt_default>; module-alt-sleep = <&module_alt_sleep>; }; };

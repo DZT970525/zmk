@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/zmkfirmware/zmk",
+  "revision": "4dd95d7840eb3d5a3f59bb29fbf1ab054715ef85",
+  "files": {
+    "ble.c": "fcf8925613bcf7685053911a565cf897824a56adf0a63c5e6499c604a4f459c2",
+    "hog.c": "2e8c12bb4197173d238a6be1e33abf2db5dedbd4a6cf29a83d5e2f6c79d4919b"
+  }
+}

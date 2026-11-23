@@ -1,8 +1,4 @@
 /*
- * Layer indicator (GP0): the LED that shows a different effect per active
- * layer.  Same role as indicator_layer.c / LAYER_INDICATOR_LED_PIN in the
- * stock QMK firmware for this board.
- *
  * Copyright (c) 2025 ZitaoTech
  *
  * SPDX-License-Identifier: MIT
@@ -26,7 +22,7 @@
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 BUILD_ASSERT(DT_HAS_CHOSEN(zmk_layer_indicator),
-             "layer_indicator: No zmk,layer_indicator chosen node found");
+             "keyboard_backlight: No zmk_layer_indicator chosen node found");
 
 static const struct device *const indiled_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_layer_indicator));
 
@@ -76,14 +72,12 @@ static uint8_t layer_effect(int layer) {
 }
 #endif
 
-/* Q20 has no shoulder keys, so every position is two lower than on the Q10:
- * the bottom-row &to keys are at 38 and 39, and layer 2 puts &bl BL_DEC,
- * &bl BL_TOG and &bl BL_INC on C, B and M (positions 28, 30 and 32). */
-#define LAYER_SWITCH_POSITION_1 38
-#define LAYER_SWITCH_POSITION_2 39
-#define BACKLIGHT_DEC_POSITION 28
-#define BACKLIGHT_TOGGLE_POSITION 30
-#define BACKLIGHT_INC_POSITION 32
+/* Q10 has two shoulder keys; the bottom-row &to keys are at 40 and 41. */
+#define LAYER_SWITCH_POSITION_1 40
+#define LAYER_SWITCH_POSITION_2 41
+#define BACKLIGHT_DEC_POSITION 30
+#define BACKLIGHT_TOGGLE_POSITION 32
+#define BACKLIGHT_INC_POSITION 34
 
 static bool prev_active = false;
 static int prev_layer = -1;
@@ -97,19 +91,25 @@ static bool cycle_direction_up = true;
 static struct k_work_delayable polling_work;
 static struct k_work_delayable blink_work;
 static struct k_work_delayable cycle_work;
-static atomic_t layer_indicator_ready;
+static atomic_t keyboard_backlight_ready;
+/* Keep retrying both channels until the hardware accepts the output. */
+static bool output_dirty = true;
 
 static void set_led_brightness(uint8_t level) {
     if (!device_is_ready(indiled_dev)) {
         LOG_ERR("Indicator LED device not ready");
+        output_dirty = true;
         return;
     }
+    bool failed = false;
     for (int i = 0; i < INDICATOR_LED_NUM_LEDS; i++) {
         int err = led_set_brightness(indiled_dev, i, level);
         if (err < 0) {
+            failed = true;
             LOG_ERR("Failed to set LED[%d] brightness: %d", i, err);
         }
     }
+    output_dirty = failed;
 }
 
 static void blink_work_handler(struct k_work *work) {
@@ -168,7 +168,7 @@ static void polling_work_handler(struct k_work *work) {
      */
     uint8_t effect = layer_effect(current_layer);
 
-    if (current_layer != prev_layer || active != prev_active || backlight_on != prev_backlight_on ||
+    if (output_dirty || current_layer != prev_layer || active != prev_active || backlight_on != prev_backlight_on ||
         backlight_brt != prev_backlight_brt || effect != prev_effect) {
         prev_layer = current_layer;
         prev_active = active;
@@ -223,8 +223,8 @@ static void polling_work_handler(struct k_work *work) {
     }
 }
 
-static int layer_indicator_event_listener(const zmk_event_t *eh) {
-    if (!atomic_get(&layer_indicator_ready)) {
+static int keyboard_backlight_event_listener(const zmk_event_t *eh) {
+    if (!atomic_get(&keyboard_backlight_ready)) {
         return ZMK_EV_EVENT_BUBBLE;
     }
 
@@ -244,10 +244,10 @@ static int layer_indicator_event_listener(const zmk_event_t *eh) {
     return ZMK_EV_EVENT_BUBBLE;
 }
 
-ZMK_LISTENER(layer_indicator_listener, layer_indicator_event_listener);
-ZMK_SUBSCRIPTION(layer_indicator_listener, zmk_position_state_changed);
+ZMK_LISTENER(keyboard_backlight_listener, keyboard_backlight_event_listener);
+ZMK_SUBSCRIPTION(keyboard_backlight_listener, zmk_position_state_changed);
 
-static int layer_indicator_init(void) {
+static int keyboardbacklight_init(void) {
     if (!device_is_ready(indiled_dev)) {
         LOG_ERR("LED indicator device not ready");
         return -ENODEV;
@@ -261,9 +261,9 @@ static int layer_indicator_init(void) {
     k_work_init_delayable(&blink_work, blink_work_handler);
     k_work_init_delayable(&cycle_work, cycle_work_handler);
 
-    atomic_set(&layer_indicator_ready, 1);
+    atomic_set(&keyboard_backlight_ready, 1);
     k_work_reschedule(&polling_work, K_MSEC(POLLING_INTERVAL_MS));
     return 0;
 }
 
-SYS_INIT(layer_indicator_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
+SYS_INIT(keyboardbacklight_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);

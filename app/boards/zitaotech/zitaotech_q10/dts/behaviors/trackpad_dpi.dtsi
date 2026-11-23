@@ -1,0 +1,13 @@
+/*
+ * Copyright (c) 2026 ZitaoTech
+ * SPDX-License-Identifier: MIT
+ */
+
+/ {
+    behaviors {
+        /omit-if-no-ref/ DPI: trackpad_dpi {
+            compatible = "zmk,behavior-trackpad-dpi";
+            #binding-cells = <1>;
+        };
+    };
+};

@@ -269,6 +269,12 @@ static void zmk_physical_layout_kscan_callback(const struct device *dev, uint32_
         return;
     }
 
+#if IS_ENABLED(CONFIG_SOFLE_MODULAR_POINTING)
+    /* Normalize module connector wiring before applying the physical layout. */
+    extern uint32_t sofle_modular_scan_column(uint32_t row, uint32_t column);
+    column = sofle_modular_scan_column(row, column);
+#endif
+
     struct zmk_kscan_event ev = {
         .row = row,
         .column = column,

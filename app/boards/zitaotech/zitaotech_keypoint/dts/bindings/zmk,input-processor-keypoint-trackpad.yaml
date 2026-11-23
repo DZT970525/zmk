@@ -1,0 +1,3 @@
+description: Standalone KEYPOINT processing of raw A320 motion
+compatible: "zmk,input-processor-keypoint-trackpad"
+include: ip_zero_param.yaml

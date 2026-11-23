@@ -13,7 +13,7 @@ config ZMK_RUNTIME_MACRO_STUDIO_RPC
 config ZMK_RUNTIME_MACRO_COUNT
     int "Maximum concurrently existing runtime macros"
     default 8
-    range 1 16
+    range 1 32
     help
       Bounds the runtime_macros keyspace's max_entries: how many named
       macros can exist at once (not a byte budget - see

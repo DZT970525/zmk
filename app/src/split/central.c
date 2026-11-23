@@ -12,6 +12,7 @@
 #include <zmk/stdlib.h>
 #include <zmk/split/transport/central.h>
 #include <zmk/split/central.h>
+#include <zmk/split/role.h>
 #include <zmk/hid_indicators_types.h>
 #include <zmk/pointing/input_split.h>
 
@@ -134,10 +135,10 @@ int zmk_split_central_update_hid_indicator(zmk_hid_indicators_t indicators) {
 
     uint8_t source_ids[ZMK_SPLIT_CENTRAL_PERIPHERAL_COUNT];
 
-    int ret = active_transport->api->get_available_source_ids(source_ids);
+    int count = active_transport->api->get_available_source_ids(source_ids);
 
-    if (ret < 0) {
-        return ret;
+    if (count < 0) {
+        return count;
     }
 
     struct zmk_split_transport_central_command command =
@@ -152,8 +153,8 @@ int zmk_split_central_update_hid_indicator(zmk_hid_indicators_t indicators) {
                 },
         };
 
-    for (size_t i = 0; i < ret; i++) {
-        ret = active_transport->api->send_command(source_ids[i], command);
+    for (size_t i = 0; i < count; i++) {
+        int ret = active_transport->api->send_command(source_ids[i], command);
         if (ret < 0) {
             return ret;
         }
@@ -178,6 +179,9 @@ int zmk_split_central_get_peripheral_battery_level(uint8_t source, uint8_t *leve
 #endif // IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING)
 
 static int select_first_available_transport(void) {
+    if (!zmk_split_role_is_central()) {
+        return 0;
+    }
     // Transports are sorted by priority, so find the first
     // One that's available, and enable it. Any transport that
     // Doesn't support `get_status` is assumed to be always
@@ -263,6 +267,13 @@ bool zmk_split_central_peripherals_connected(void) {
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
 
 int zmk_split_relay_event_send(const struct zmk_split_relay_event_payload *payload) {
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RUNTIME_ROLE)
+    if (!zmk_split_role_is_central()) {
+        extern int zmk_split_peripheral_relay_event_send(
+            const struct zmk_split_relay_event_payload *payload);
+        return zmk_split_peripheral_relay_event_send(payload);
+    }
+#endif
     if (!active_transport || !active_transport->api || !active_transport->api->send_command ||
         !active_transport->api->get_available_source_ids) {
         LOG_WRN("No split transport able to relay events");

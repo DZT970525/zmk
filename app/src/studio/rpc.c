@@ -8,6 +8,10 @@
 
 #include <pb_encode.h>
 #include <pb_decode.h>
+#include <zephyr/device.h>
+#if IS_ENABLED(CONFIG_UART_LINE_CTRL) && DT_HAS_CHOSEN(zmk_studio_rpc_uart)
+#include <zephyr/drivers/uart.h>
+#endif
 
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
@@ -21,6 +25,7 @@ LOG_MODULE_REGISTER(zmk_studio, CONFIG_ZMK_STUDIO_LOG_LEVEL);
 #include <zmk/events/endpoint_changed.h>
 #include <zmk/studio/core.h>
 #include <zmk/studio/rpc.h>
+#include <zmk/split/role.h>
 
 ZMK_EVENT_IMPL(zmk_studio_rpc_notification);
 
@@ -56,14 +61,47 @@ zmk_studio_Response zmk_rpc_subsystem_delegate_to_subs(const struct zmk_rpc_subs
 }
 
 static zmk_studio_Response handle_request(const zmk_studio_Request *req) {
+    /* Identity/lock queries do not access the keymap or its transfer buffer.
+     * Keep Studio discovery usable while the left authority is synchronizing. */
+    if (req->which_subsystem==zmk_studio_Request_core_tag &&
+        (req->subsystem.core.which_request_type==zmk_core_Request_get_device_info_tag ||
+         req->subsystem.core.which_request_type==zmk_core_Request_get_lock_state_tag)) {
+        struct zmk_rpc_subsystem *core=find_subsystem_for_choice(req->which_subsystem);
+        zmk_studio_Response response=core ? core->func(core,req) :
+            ZMK_RPC_RESPONSE(meta,simple_error,zmk_meta_ErrorConditions_RPC_NOT_FOUND);
+        response.type.request_response.request_id=req->request_id;
+        return response;
+    }
+    if (!zmk_keypoint_config_rpc_ready()) {
+        zmk_studio_Response resp=ZMK_RPC_RESPONSE(meta, simple_error, zmk_meta_ErrorConditions_GENERIC);
+        resp.type.request_response.request_id=req->request_id;
+        return resp;
+    }
     zmk_studio_core_reschedule_lock_timeout();
+    zmk_keypoint_config_lock();
+    if (!zmk_keypoint_config_rpc_ready()) {
+        zmk_keypoint_config_unlock();
+        zmk_studio_Response resp=ZMK_RPC_RESPONSE(meta, simple_error, zmk_meta_ErrorConditions_GENERIC);
+        resp.type.request_response.request_id=req->request_id;
+        return resp;
+    }
     struct zmk_rpc_subsystem *sub = find_subsystem_for_choice(req->which_subsystem);
     if (!sub) {
         LOG_WRN("No subsystem found for choice %d", req->which_subsystem);
-        return ZMK_RPC_RESPONSE(meta, simple_error, zmk_meta_ErrorConditions_RPC_NOT_FOUND);
+        zmk_keypoint_config_unlock();
+        zmk_studio_Response resp = ZMK_RPC_RESPONSE(meta, simple_error,
+                                                  zmk_meta_ErrorConditions_RPC_NOT_FOUND);
+        resp.type.request_response.request_id = req->request_id;
+        return resp;
     }
 
     zmk_studio_Response resp = sub->func(sub, req);
+    int checkpoint=zmk_keypoint_config_checkpoint_after_rpc();
+    if (checkpoint) {
+        LOG_ERR("Authoritative configuration checkpoint failed (%d)",checkpoint);
+        resp=ZMK_RPC_RESPONSE(meta, simple_error, zmk_meta_ErrorConditions_GENERIC);
+    }
+    zmk_keypoint_config_unlock();
     resp.type.request_response.request_id = req->request_id;
 
     return resp;
@@ -96,7 +134,14 @@ static bool rpc_read_cb(pb_istream_t *stream, uint8_t *buf, size_t count) {
                 }
             }
         } else {
-            k_sem_take(&rpc_rx_sem, K_FOREVER);
+            /* A host may close USB midway through an RPC. Never carry that
+             * incomplete protobuf into the next Studio session. Idle readers
+             * still sleep indefinitely; only an in-progress frame expires. */
+            if (k_sem_take(&rpc_rx_sem, (!selected_transport || selected_transport->transport != ZMK_TRANSPORT_USB || rpc_framing_state == FRAMING_STATE_IDLE)
+                           ? K_FOREVER : K_MSEC(2000)) != 0) {
+                stream->bytes_left = 0;
+                return false;
+            }
         }
 
         ring_buf_get_finish(&rpc_rx_buf, len);
@@ -211,6 +256,12 @@ static int send_response(const zmk_studio_Response *resp) {
         goto exit;
     }
 
+#if IS_ENABLED(CONFIG_UART_LINE_CTRL) && DT_HAS_CHOSEN(zmk_studio_rpc_uart)
+    if (selected_transport->transport==ZMK_TRANSPORT_USB) {
+        uint32_t dtr=0;
+        if (!uart_line_ctrl_get(DEVICE_DT_GET(DT_CHOSEN(zmk_studio_rpc_uart)),UART_LINE_CTRL_DTR,&dtr) && !dtr) goto exit;
+    }
+#endif
     void *user_data = selected_transport->tx_user_data ? selected_transport->tx_user_data() : NULL;
 
     pb_ostream_t stream = pb_ostream_for_tx_buf(user_data);

@@ -21,18 +21,18 @@
  */
 
 /** Pictures in the rotation.  Bit i of an enabled mask is picture i. */
-#define ZITAOTECH_SCREEN_PICTURES 10
+#define ZITAOTECH_SCREEN_PICTURES 28
 
 #define ZITAOTECH_SCREEN_INTERVAL_DEFAULT_S 60
 #define ZITAOTECH_SCREEN_INTERVAL_MIN_S 5
 #define ZITAOTECH_SCREEN_INTERVAL_MAX_S 600
-#define ZITAOTECH_SCREEN_PICTURES_DEFAULT 0x3ff
+#define ZITAOTECH_SCREEN_PICTURES_DEFAULT 0x0fffffff
 
 /** Seconds each picture stays on screen. */
 uint32_t zitaotech_screen_interval_s(void);
 
 /** Bit i set = picture i takes part in the rotation (bit 0 = cat). */
-uint16_t zitaotech_screen_enabled_mask(void);
+uint32_t zitaotech_screen_enabled_mask(void);
 
 /**
  * Apply a new configuration.  The values are clamped, persisted on this half
@@ -40,22 +40,23 @@ uint16_t zitaotech_screen_enabled_mask(void);
  * zitaotech_screen_state_changed().
  */
 int zitaotech_screen_set_interval_s(uint32_t seconds);
-int zitaotech_screen_set_enabled_mask(uint16_t mask);
+int zitaotech_screen_set_enabled_mask(uint32_t mask);
 int zitaotech_screen_reset(void);
 
 /** What the right half last reported showing (central half's view). */
 bool zitaotech_screen_right_connected(void);
 uint32_t zitaotech_screen_right_interval_s(void);
-uint16_t zitaotech_screen_right_applied_mask(void);
+uint32_t zitaotech_screen_right_applied_mask(void);
 
 /** Weak; the Studio RPC handler overrides it to push a notification. */
 void zitaotech_screen_state_changed(void);
 
 /** The mirrored configuration; only the peripheral's copy drives a screen. */
-struct zitaotech_screen_config_mirror_v3 {
+struct zitaotech_screen_config_mirror_v4 {
+    uint32_t enabled_mask; /* bit31: sequential */
     uint16_t interval_ticks;
-    uint8_t order[5];
-    uint16_t enabled_mask;
+    uint8_t order[4];
+    uint8_t part; /* generation[7:3], part[2:0] */
     uint8_t source;
 };
 
@@ -64,7 +65,7 @@ struct zitaotech_screen_config_mirror_v3 {
  * so a half that has just powered up (or been reflashed) does not keep showing
  * the factory defaults until the next change.
  */
-struct zitaotech_screen_config_request_v3 {
+struct zitaotech_screen_config_request_v4 {
     uint8_t source;
 };
 
@@ -73,23 +74,24 @@ struct zitaotech_screen_config_request_v3 {
  * (and through it, Studio) can tell that the right half really took the values
  * instead of only being asked to.
  */
-struct zitaotech_screen_config_applied_v3 {
+struct zitaotech_screen_config_applied_v4 {
+    uint32_t enabled_mask; /* bit31: sequential */
     uint16_t interval_ticks;
-    uint8_t order[5];
-    uint16_t enabled_mask;
+    uint8_t order[4];
+    uint8_t part; /* generation[7:3], part[2:0] */
     uint8_t source;
 };
 
 /** The central asks the peripheral what it is showing (answered with the
  * event above), so a report is fresh by the time Studio reads the state. */
-struct zitaotech_screen_config_query_v3 {
+struct zitaotech_screen_config_query_v4 {
     uint8_t source;
 };
 
-ZMK_EVENT_DECLARE(zitaotech_screen_config_mirror_v3);
-ZMK_EVENT_DECLARE(zitaotech_screen_config_request_v3);
-ZMK_EVENT_DECLARE(zitaotech_screen_config_applied_v3);
-ZMK_EVENT_DECLARE(zitaotech_screen_config_query_v3);
+ZMK_EVENT_DECLARE(zitaotech_screen_config_mirror_v4);
+ZMK_EVENT_DECLARE(zitaotech_screen_config_request_v4);
+ZMK_EVENT_DECLARE(zitaotech_screen_config_applied_v4);
+ZMK_EVENT_DECLARE(zitaotech_screen_config_query_v4);
 
 /** Ask the right half to report; returns immediately. */
 void zitaotech_screen_refresh_right(void);
@@ -104,10 +106,10 @@ void zmk_widget_status_carousel_config_changed(void);
 #define ZITAOTECH_SCREEN_INTERVAL_MAX_MS 600000
 uint32_t zitaotech_screen_interval_ms(void);
 bool zitaotech_screen_sequential(void);
-void zitaotech_screen_playback_order(uint8_t out[5]);
+void zitaotech_screen_playback_order(uint8_t out[28]);
 uint32_t zitaotech_screen_right_interval_ms(void);
 bool zitaotech_screen_right_sequential(void);
-void zitaotech_screen_right_playback_order(uint8_t out[5]);
-int zitaotech_screen_set_playback(uint32_t ms, bool sequential, const uint8_t order[5]);
+void zitaotech_screen_right_playback_order(uint8_t out[28]);
+int zitaotech_screen_set_playback(uint32_t ms, bool sequential, const uint8_t order[28]);
 
 

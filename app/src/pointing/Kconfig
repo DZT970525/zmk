@@ -45,6 +45,10 @@ config ZMK_INPUT_PROCESSOR_TEMP_LAYER_MAX_ACTION_EVENTS
     default 4
     depends on ZMK_INPUT_PROCESSOR_TEMP_LAYER
 
+config ZMK_INPUT_PROCESSOR_TEMP_LAYER_PRIORITY
+    bool "Temporary input layer takes priority over other active layers"
+    depends on ZMK_INPUT_PROCESSOR_TEMP_LAYER
+
 endif
 
 config ZMK_INPUT_PROCESSOR_TRANSFORM

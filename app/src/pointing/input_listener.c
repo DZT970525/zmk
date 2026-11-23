@@ -20,6 +20,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/endpoints.h>
 #include <drivers/input_processor.h>
 #include <zmk/pointing.h>
+#include <zmk/split/role.h>
 
 #if IS_ENABLED(CONFIG_ZMK_POINTING_SMOOTH_SCROLLING)
 #include <zmk/pointing/resolution_multipliers.h>
@@ -283,6 +284,9 @@ static void apply_resolution_scaling(const struct input_listener_config *config,
 
 static void input_handler(const struct input_listener_config *config,
                           struct input_listener_data *data, struct input_event *evt) {
+    if (!zmk_keypoint_config_ready() || !zmk_split_role_is_central()) {
+        return;
+    }
     if (zitaotech_screen_transfer_active()) {
         clear_xy_data(&data->mouse.data);
         clear_xy_data(&data->mouse.wheel_data);
@@ -397,7 +401,9 @@ static void input_handler(const struct input_listener_config *config,
 
 #define IL_OVERRIDE_DATA(node, parent) IL_EXTRACT_DATA(node, parent, node)
 
-#if DT_NODE_EXISTS(DT_NODELABEL(bbtrackpad))
+#if ((IS_ENABLED(CONFIG_BOARD_KEYPOINT_DONGLE) || IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE)) || IS_ENABLED(CONFIG_ZMK_SPLIT_RUNTIME_ROLE) || IS_ENABLED(CONFIG_BOARD_SOFLE_DONGLE_LEFT)) && DT_NODE_EXISTS(DT_NODELABEL(bbtrackpad_split))
+#define IL_NATIVE_HIGHRES(n) DT_SAME_NODE(DT_INST_PHANDLE(n, device), DT_NODELABEL(bbtrackpad_split))
+#elif DT_NODE_EXISTS(DT_NODELABEL(bbtrackpad))
 #define IL_NATIVE_HIGHRES(n) DT_SAME_NODE(DT_INST_PHANDLE(n, device), DT_NODELABEL(bbtrackpad))
 #else
 #define IL_NATIVE_HIGHRES(n) 0
@@ -435,5 +441,3 @@ static void input_handler(const struct input_listener_config *config,
         ())
 
 DT_INST_FOREACH_STATUS_OKAY(IL_INST)
-
-

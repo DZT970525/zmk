@@ -47,7 +47,11 @@ static inline struct zmk_endpoint_instance zitaotech_caps_endpoint(void) {
 
 /** HID indicators (Caps Lock, Num Lock, ...) of the profile used for Caps Lock. */
 static inline zmk_hid_indicators_t zitaotech_caps_indicators(void) {
+#if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    return zmk_hid_indicators_get_current_profile();
+#else
     return zmk_hid_indicators_get_profile(zitaotech_caps_endpoint());
+#endif
 }
 
 /*
@@ -208,12 +212,14 @@ enum zitaotech_trackpad_mode_key {
     ZITAOTECH_TRACKPAD_KEY_FAST = 1,
     ZITAOTECH_TRACKPAD_KEY_SLOW = 2,
     ZITAOTECH_TRACKPAD_KEY_SCROLL = 3,
-    ZITAOTECH_TRACKPAD_KEY_COUNT = 4,
+    ZITAOTECH_TRACKPAD_KEY_FAST_SCROLL = 4,
+    ZITAOTECH_TRACKPAD_KEY_COUNT = 5,
 };
 
 int32_t zitaotech_trackpad_arrow_key_position(void);
 int32_t zitaotech_trackpad_fast_key_position(void);
 int32_t zitaotech_trackpad_slow_key_position(void);
+int32_t zitaotech_trackpad_fast_scroll_key_position(void);
 int32_t zitaotech_trackpad_scroll_key_position(void);
 
 /** Assign one mode key; pass position < 0 to clear it. */
@@ -269,3 +275,5 @@ ZMK_EVENT_DECLARE(zitaotech_trackpad_dpi_changed);
 #ifdef __cplusplus
 }
 #endif
+
+void zitaotech_trackpad_relay_arrow_tap(uint16_t usage);

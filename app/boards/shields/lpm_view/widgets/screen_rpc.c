@@ -45,17 +45,27 @@ ZMK_RPC_CUSTOM_SUBSYSTEM_RESPONSE_BUFFER(zitaotech__screen, zitaotech_screen_Res
 static void fill_error(zitaotech_screen_Response *resp, const char *message);
 static void fill_ok(zitaotech_screen_Response *resp);
 
+static void pack_order(uint8_t out[18], const uint8_t order[28]) {
+    memset(out,0,18);
+    for(unsigned i=0;i<28;i++){unsigned bit=i*5;out[bit/8]|=order[i]<<(bit%8);if(bit%8>3)out[bit/8+1]|=order[i]>>(8-bit%8);}
+}
+static void unpack_order(uint8_t out[28], const uint8_t bytes[18]) {
+    for(unsigned i=0;i<28;i++){unsigned bit=i*5;unsigned value=bytes[bit/8]>>(bit%8);if(bit%8>3)value|=(unsigned)bytes[bit/8+1]<<(8-bit%8);out[i]=value&31;}
+}
 static void fill_state(zitaotech_screen_State *out) {
+    out->right_image_read_supported = true;
     out->image_transfer_supported = true;
     out->image_management_supported = true;
     out->usb_image_upload_supported = true;
     out->playback_supported = true;
     out->interval_ms = zitaotech_screen_interval_ms();
     out->sequential = zitaotech_screen_sequential();
-    out->playback_order.size=5; zitaotech_screen_playback_order(out->playback_order.bytes);
+    uint8_t order[28]; zitaotech_screen_playback_order(order);
+    out->playback_order.size=18; pack_order(out->playback_order.bytes,order);
     out->right_interval_ms=zitaotech_screen_right_interval_ms();
     out->right_sequential=zitaotech_screen_right_sequential();
-    out->right_playback_order.size=5; zitaotech_screen_right_playback_order(out->right_playback_order.bytes);
+    zitaotech_screen_right_playback_order(order);
+    out->right_playback_order.size=18; pack_order(out->right_playback_order.bytes,order);
     out->interval_s = zitaotech_screen_interval_s();
     out->interval_min = ZITAOTECH_SCREEN_INTERVAL_MIN_S;
     out->interval_max = ZITAOTECH_SCREEN_INTERVAL_MAX_S;
@@ -89,7 +99,7 @@ static void fill_image_list(zitaotech_screen_ImageListResponse *out) {
  * handed to the store when the last chunk lands.  One transfer at a time, which
  * is all the web UI ever does.
  */
-static uint8_t image_staging[ZITAOTECH_SCREEN_IMAGE_MAX_BYTES];
+static uint8_t *image_staging;
 static struct {
     uint32_t slot;
     uint32_t format;
@@ -111,6 +121,8 @@ static int handle_image_write(const zitaotech_screen_ImageWriteRequest *req,
     }
 
     if (req->offset == 0) {
+        image_staging = zitaotech_screen_image_upload_buffer(1);
+        if (!image_staging) { fill_error(resp,"Image transfer busy"); return 0; }
         image_transfer.slot = req->slot;
         image_transfer.format = req->format;
         image_transfer.total_size = req->total_size;
@@ -143,6 +155,7 @@ static int handle_image_write(const zitaotech_screen_ImageWriteRequest *req,
                                            image_transfer.total_size);
     image_transfer.active = false;
     if (ret < 0) {
+        zitaotech_screen_image_upload_end(1);
         fill_error(resp, "Failed to store picture");
         return 0;
     }
@@ -150,6 +163,7 @@ static int handle_image_write(const zitaotech_screen_ImageWriteRequest *req,
     out = &resp->response_type.image_write;
     out->stored = true;
     out->crc32 = crc32_ieee(image_staging, image_transfer.total_size);
+    zitaotech_screen_image_upload_end(1);
     return 0;
 }
 
@@ -243,15 +257,17 @@ static bool zitaotech_screen_rpc_handle_request(const zmk_custom_CallRequest *ra
         }
 
         if (config->has_interval_ms || config->has_sequential || config->playback_order.size) {
-            uint8_t order[5]; zitaotech_screen_playback_order(order);
-            if(config->playback_order.size){if(config->playback_order.size!=5){fill_error(resp,"Invalid playback order");return true;} memcpy(order,config->playback_order.bytes,5);}
+            uint8_t order[28]; zitaotech_screen_playback_order(order);
+            if(config->playback_order.size){if(config->playback_order.size==5){for(unsigned i=0;i<10;i++)order[i]=(config->playback_order.bytes[i/2]>>(i%2?0:4))&15;}
+            else if(config->playback_order.size==18)unpack_order(order,config->playback_order.bytes);
+            else {fill_error(resp,"Invalid playback order");return true;}}
             if(zitaotech_screen_set_playback(config->has_interval_ms?config->interval_ms:zitaotech_screen_interval_ms(),config->has_sequential?config->sequential:zitaotech_screen_sequential(),order)){fill_error(resp,"Failed to save playback configuration");return true;}
         }
         if (config->has_interval_s) {
             if(zitaotech_screen_set_interval_s(config->interval_s)){fill_error(resp,"Failed to save interval");return true;}
         }
         if (config->has_enabled_mask) {
-            if(zitaotech_screen_set_enabled_mask((uint16_t)config->enabled_mask)){fill_error(resp,"Failed to save enabled images");return true;}
+            if(zitaotech_screen_set_enabled_mask(config->enabled_mask)){fill_error(resp,"Failed to save enabled images");return true;}
         }
         fill_ok(resp);
         return true;
@@ -262,7 +278,7 @@ static bool zitaotech_screen_rpc_handle_request(const zmk_custom_CallRequest *ra
         fill_ok(resp);
         return true;
     case zitaotech_screen_Request_image_sync_tag:
-        if (image_transfer.active || zitaotech_usb_image_active() || zitaotech_screen_image_sync(req.request_type.image_sync.slot))
+        if (image_transfer.active || zitaotech_usb_image_active() || (req.request_type.image_sync.read_back ? zitaotech_screen_image_fetch(req.request_type.image_sync.slot) : zitaotech_screen_image_sync(req.request_type.image_sync.slot)))
             fill_error(resp,"Image transfer unavailable or busy");
         else fill_ok(resp);
         return true;
@@ -292,8 +308,8 @@ static bool zitaotech_screen_rpc_handle_request(const zmk_custom_CallRequest *ra
     case zitaotech_screen_Request_image_write_tag:
         return handle_image_write(&req.request_type.image_write, resp) == 0;
     case zitaotech_screen_Request_image_read_tag: {
-        if (zitaotech_screen_transfer_active() || zitaotech_usb_image_active() || image_transfer.active) { fill_error(resp, "Image transfer busy"); return true; }
         const zitaotech_screen_ImageReadRequest *read = &req.request_type.image_read;
+        if ((zitaotech_screen_transfer_active() && !zitaotech_screen_image_read_ready(read->slot)) || zitaotech_usb_image_active() || image_transfer.active) { fill_error(resp, "Image transfer busy"); return true; }
         struct zitaotech_screen_image_info info;
         if (!zitaotech_screen_image_info(read->slot, &info) || read->offset >= info.size) {
             fill_error(resp, "No such picture or offset"); return true;
@@ -302,7 +318,10 @@ static bool zitaotech_screen_rpc_handle_request(const zmk_custom_CallRequest *ra
         zitaotech_screen_ImageReadResponse *out = &resp->response_type.image_read;
         out->slot = read->slot; out->offset = read->offset; out->crc32 = info.crc32;
         out->data.size = MIN(64, info.size - read->offset);
-        memcpy(out->data.bytes, zitaotech_screen_image_data(read->slot) + read->offset, out->data.size);
+        const uint8_t *data = zitaotech_screen_image_data(read->slot);
+        if (!data) { fill_error(resp,"Preview is retained by Studio; upload again to retransmit"); return true; }
+        memcpy(out->data.bytes, data + read->offset, out->data.size);
+        if(read->offset+out->data.size>=info.size)zitaotech_screen_image_read_finish(read->slot);
         return true;
     }
     case zitaotech_screen_Request_image_erase_tag:

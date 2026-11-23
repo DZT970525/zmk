@@ -23,6 +23,7 @@
 
 #include <drivers/behavior.h>
 #include <zmk/behavior.h>
+#include <zmk/configurable_mod_tap.h>
 #include <zmk/hid.h>
 #include <zmk/screen_transfer.h>
 #include <zmk/matrix.h>
@@ -145,8 +146,12 @@ static int validate_hid_usage(uint16_t usage_page, uint16_t usage_id) {
          * than a rejected value.  Accept the whole 8-bit usage space, keeping
          * only usage 0 and the unused 0x00A5..0x00DF block out.
          */
-        if (usage_id == 0 ||
+        if (usage_id == 0 || usage_id > 0xFF ||
+#if IS_ENABLED(CONFIG_ZMK_HID_REPORT_TYPE_HKRO)
+            (usage_id > HID_USAGE_KEY_KEYBOARD_EXSEL &&
+#else
             (usage_id > ZMK_HID_KEYBOARD_NKRO_MAX_USAGE &&
+#endif
              usage_id < HID_USAGE_KEY_KEYBOARD_LEFTCONTROL)) {
             return -EINVAL;
         }
@@ -269,7 +274,16 @@ int zmk_behavior_validate_binding(const struct zmk_behavior_binding *binding) {
         return ret;
     }
 
-    return zmk_behavior_check_params_match_metadata(&metadata, binding->param1, binding->param2);
+    uint32_t param1 = binding->param1;
+#if DT_NODE_EXISTS(DT_NODELABEL(configurable_mt))
+    if (behavior == DEVICE_DT_GET(DT_NODELABEL(configurable_mt))) {
+        if (!zmk_configurable_mt_term_valid(param1)) {
+            return -EINVAL;
+        }
+        param1 = zmk_configurable_mt_hold(param1);
+    }
+#endif
+    return zmk_behavior_check_params_match_metadata(&metadata, param1, binding->param2);
 #else
     return 0;
 #endif // IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
@@ -323,30 +337,34 @@ static int behavior_handle_set(const char *name, size_t len, settings_read_cb re
 
     if (settings_name_steq(name, "local_id", &next) && next) {
         char *endptr;
-        zmk_behavior_local_id_t local_id = strtoul(next, &endptr, 10);
-        if (*endptr != '\0') {
+        unsigned long parsed_id = strtoul(next, &endptr, 10);
+        if (next[0] < '0' || next[0] > '9' || *endptr != '\0' ||
+            parsed_id == 0 || parsed_id >= UINT16_MAX) {
             LOG_WRN("Invalid behavior local ID: %s with endptr %s", next, endptr);
             return -EINVAL;
         }
 
-        if (len >= 64) {
+        zmk_behavior_local_id_t local_id = parsed_id;
+        if (len == 0 || len >= 64) {
             LOG_ERR("Too large binding setting size (got %d expected less than %d)", len, 64);
             return -EINVAL;
         }
 
-        char name[len + 1];
+        char name[64];
 
         int err = read_cb(cb_arg, name, len);
-        if (err <= 0) {
+        if (err < 0 || (size_t)err != len) {
             LOG_ERR("Failed to handle keymap binding from settings (err %d)", err);
-            return err;
+            return err < 0 ? err : -EINVAL;
         }
 
         name[len] = '\0';
+        /* Retired behaviors still reserve their IDs: old keymaps may refer
+         * to them. Never overwrite those records when adding a new behavior. */
+        largest_local_id = MAX(largest_local_id, local_id);
         STRUCT_SECTION_FOREACH(zmk_behavior_local_id_map, item) {
-            if (strcmp(name, item->device->name) == 0) {
+            if (item->device && item->device->name && strcmp(name, item->device->name) == 0) {
                 item->local_id = local_id;
-                largest_local_id = MAX(largest_local_id, local_id);
                 return 0;
             }
         }
@@ -368,16 +386,27 @@ static int behavior_handle_commit(void) {
             continue;
         }
 
-        item->local_id = ++largest_local_id;
+        if (largest_local_id >= UINT16_MAX - 1) return -ENOSPC;
+        zmk_behavior_local_id_t candidate_id = largest_local_id + 1;
         char setting_name[32];
-        sprintf(setting_name, "behavior/local_id/%d", item->local_id);
+        snprintf(setting_name, sizeof(setting_name), "behavior/local_id/%u", candidate_id);
 
         // If the `device->name` is readonly in flash, settings save can fail to copy/read it while
         // persisting to flash, so copy the device name into memory first before saving.
-        char device_name[32];
-        snprintf(device_name, ARRAY_SIZE(device_name), "%s", item->device->name);
+        char device_name[64];
+        size_t name_len = strlen(item->device->name);
+        if (!name_len || name_len >= sizeof(device_name)) return -EINVAL;
+        memcpy(device_name, item->device->name, name_len + 1);
 
-        settings_save_one(setting_name, device_name, strlen(device_name));
+        if (!IS_ENABLED(CONFIG_ZMK_DIAGNOSTIC_SKIP_BEHAVIOR_ID_SAVE)) {
+            int err = settings_save_one(setting_name, device_name, name_len);
+            if (err) {
+                LOG_ERR("Failed to persist behavior ID %u: %d", candidate_id, err);
+                return err;
+            }
+        }
+        item->local_id = candidate_id;
+        largest_local_id = candidate_id;
     }
 
     return 0;

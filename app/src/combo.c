@@ -507,7 +507,11 @@ static int keycode_state_changed_listener(const zmk_event_t *eh) {
     return ZMK_EV_EVENT_BUBBLE;
 }
 
+#include <zmk/split/role.h>
 int behavior_combo_listener(const zmk_event_t *eh) {
+    if (!zmk_keypoint_config_ready() || !zmk_split_role_is_central()) {
+        return ZMK_EV_EVENT_BUBBLE;
+    }
     if (as_zmk_position_state_changed(eh) != NULL) {
         return position_state_changed_listener(eh);
     } else if (as_zmk_keycode_state_changed(eh) != NULL) {
